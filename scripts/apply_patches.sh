@@ -62,4 +62,10 @@ apply_patch \
   "${PATCH_DIR}/ascendnpu-ir-llvm20-compat.patch" \
   "${PROJECT_ROOT}/thirdparty/triton-ascend/third_party/ascend/AscendNPU-IR"
 
+# Patch 3: triton-ascend LLVM 20 API compatibility
+# call_interface_impl was renamed to function_interface_impl in LLVM 20
+apply_patch \
+  "${PATCH_DIR}/triton-ascend-llvm20-compat.patch" \
+  "${PROJECT_ROOT}/thirdparty/triton-ascend"
+
 echo "=== Patches done ==="

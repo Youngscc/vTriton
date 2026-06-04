@@ -2,8 +2,6 @@
 # Triton Dialect Library (Built from Triton-Ascend Source)
 #
 # Only builds the core Triton dialect (not TritonGPU/TritonNvidiaGPU).
-# Traits.cpp is excluded because it depends on TritonGPU headers which are
-# incompatible with LLVM 20 and not needed for the modelling pipeline.
 #
 # Mode A (recommended): reuse pre-generated .inc (needs TRITON_BUILD_DIR)
 # Mode B: run mlir-tblgen (needs only TRITON_SRC_DIR)
@@ -75,12 +73,25 @@ if(NOT TRITON_GEN_INC_DIR)
     "AttrInterfaces.cpp.inc" -gen-attr-interface-defs)
   list(APPEND _tt_gen ${_out}/AttrInterfaces.h.inc ${_out}/AttrInterfaces.cpp.inc)
 
-  add_tblgen_rule(${_out} "${_td}/TritonTypeInterfaces.td"
-    "TritonTypeInterfaces.h.inc"   -gen-type-interface-decls)
-  add_tblgen_rule(${_out} "${_td}/TritonTypeInterfaces.td"
-    "TritonTypeInterfaces.cpp.inc" -gen-type-interface-defs)
-  list(APPEND _tt_gen
-    ${_out}/TritonTypeInterfaces.h.inc ${_out}/TritonTypeInterfaces.cpp.inc)
+  # TritonTypeInterfaces.td was merged into TritonTypes.td in newer upstream
+  if(EXISTS "${_td}/TritonTypeInterfaces.td")
+    add_tblgen_rule(${_out} "${_td}/TritonTypeInterfaces.td"
+      "TritonTypeInterfaces.h.inc"   -gen-type-interface-decls)
+    add_tblgen_rule(${_out} "${_td}/TritonTypeInterfaces.td"
+      "TritonTypeInterfaces.cpp.inc" -gen-type-interface-defs)
+    list(APPEND _tt_gen
+      ${_out}/TritonTypeInterfaces.h.inc ${_out}/TritonTypeInterfaces.cpp.inc)
+  endif()
+
+  # TritonCanonicalize.inc from Canonicalize.td (added in newer upstream)
+  # Included without path prefix, so output to root gen include dir
+  set(_canonicalize_td "${TRITON_SRC_DIR}/lib/Dialect/Triton/IR/Canonicalize.td")
+  if(EXISTS "${_canonicalize_td}")
+    set(_gen_inc_root "${TRITON_GEN_INC_DIR}")
+    add_tblgen_rule(${_gen_inc_root} "${_canonicalize_td}"
+      "TritonCanonicalize.inc" -gen-rewriters)
+    list(APPEND _tt_gen ${_gen_inc_root}/TritonCanonicalize.inc)
+  endif()
 
   add_tblgen_rule(${_out} "${_td}/TritonOpInterfaces.td"
     "OpInterfaces.h.inc"   -gen-op-interface-decls)
@@ -92,14 +103,15 @@ if(NOT TRITON_GEN_INC_DIR)
 endif()
 
 #===----------------------------------------------------------------------===//
-# TritonDialectIR (core only, no Traits.cpp/TritonGPU)
+# TritonDialectIR (core only, no TritonGPU)
 #===----------------------------------------------------------------------===//
 
 add_library(TritonDialectIR STATIC
   ${TRITON_IR_LIB_DIR}/Dialect.cpp
   ${TRITON_IR_LIB_DIR}/Ops.cpp
   ${TRITON_IR_LIB_DIR}/Types.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/TraitsStub.cpp
+  ${TRITON_IR_LIB_DIR}/OpInterfaces.cpp
+  ${TRITON_IR_LIB_DIR}/Traits.cpp
 )
 
 add_dependencies(TritonDialectIR TritonDialectIncGen)
@@ -120,5 +132,5 @@ target_link_libraries(TritonDialectIR PUBLIC
 # Export
 set(TRITON_GEN_INC_DIR ${TRITON_GEN_INC_DIR} PARENT_SCOPE)
 
-message(STATUS "  TritonDialectIR: Dialect.cpp Ops.cpp Types.cpp")
+message(STATUS "  TritonDialectIR: Dialect.cpp Ops.cpp Types.cpp OpInterfaces.cpp Traits.cpp")
 message(STATUS "=== Triton Dialects configured ===")
