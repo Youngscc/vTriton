@@ -24,7 +24,8 @@ from .constants import (
     MemLoc,
 )
 
-DEFAULT_CALIB_PATH = Path(__file__).parent.parent / "data" / "calib_910b3_v1.json"
+DEFAULT_CALIB_PATH = Path(__file__).parent / "data" / "calib_910b3_v1.json"
+_DEFAULT_BW_CSV_NAME = "bandwidth_910b3.csv"
 
 
 def _parse_constant(d: dict) -> CalibrationConstant:
@@ -68,12 +69,19 @@ def load_calibration(path: str | Path | None = None) -> CalibrationDB:
     # Use the built-in deserializer (handles nesting)
     db = CalibrationDB.from_dict(raw)
 
-    # Load bandwidth CSV if present alongside the JSON
+    # Load bandwidth CSV: first try <json-stem>.csv, then bandwidth_910b3.csv in same dir
     bw_csv = path.with_suffix("").with_suffix(".csv")
+    if not bw_csv.exists():
+        bw_csv = path.parent / _DEFAULT_BW_CSV_NAME
     if bw_csv.exists():
         _load_bandwidth_csv(db, bw_csv)
 
     return db
+
+
+def load_default_calib_db() -> CalibrationDB:
+    """Load the default 910B3 calibration DB from the package data directory."""
+    return load_calibration(DEFAULT_CALIB_PATH)
 
 
 def _load_bandwidth_csv(db: CalibrationDB, csv_path: Path) -> None:

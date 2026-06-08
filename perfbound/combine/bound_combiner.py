@@ -22,11 +22,12 @@ from enum import Enum
 from typing import Optional
 
 from ..model.grid_model import GridBound
-from ..model.component_model import ComponentBound
-from ..model.serialization import SerializationSplit
+from ..model.component_model import ComponentBound, compute_component_floor
+from ..model.serialization import SerializationSplit, classify_handoffs
 from ..extract.op_classifier import Component
 from ..extract.hivm_extractor import HIVMExtract
 from ..extract.eligibility_oracle import get_eligibility
+from ..calibration.constants import CalibrationDB
 
 
 class BindingTier(str, Enum):
@@ -180,6 +181,85 @@ def combine(
         binding_component=binding_component,
         attribution=attribution,
     )
+
+
+def bound_from_extract(
+    extract: HIVMExtract,
+    calib_db: Optional[CalibrationDB] = None,
+    kernel_name: str = "unknown",
+    n_cores: int = 20,
+    occupancy: float = 1.0,
+    load_balance: float = 1.0,
+) -> BoundResult:
+    """High-level entry point: compute T_bound from an HIVM extract + calibration.
+
+    Auto-loads the default 910B3 CalibrationDB when calib_db is None.
+    Falls back to I_c = 0 (T_core_floor = inf/0) gracefully when no
+    calibration file exists.
+
+    Args:
+        extract: M3 HIVM extraction result.
+        calib_db: Calibration DB with real sustained rates.  Auto-loaded
+                  from the package data directory when None.
+        kernel_name: Label for the BoundResult.
+        n_cores: Number of cores assigned to this kernel.
+        occupancy: Grid occupancy fraction (0, 1].
+        load_balance: Load balance fraction (0, 1].
+
+    Returns:
+        BoundResult with T_bound and decomposed floors.
+    """
+    from ..calibration.calib_loader import load_default_calib_db
+    from ..model.component_model import compute_component_floor_from_db
+    from ..model.grid_model import GridBound
+
+    if calib_db is None:
+        try:
+            calib_db = load_default_calib_db()
+        except FileNotFoundError:
+            calib_db = None
+
+    if calib_db is not None:
+        comp = compute_component_floor_from_db(extract, calib_db)
+        mandatory_cycles = calib_db.mandatory_handoff_cycles
+        clock_ghz = calib_db.core.clock_freq_ghz
+        try:
+            i_binding, _ = calib_db.memory.lookup_bw("gm", "ub")
+        except KeyError:
+            i_binding = 1.0
+    else:
+        from ..calibration.constants import CubeConfig, VectorConfig, MemHierarchy, CoreConfig
+        comp = compute_component_floor(
+            extract,
+            CubeConfig(), VectorConfig(), MemHierarchy(), CoreConfig(),
+        )
+        mandatory_cycles = 0.0
+        clock_ghz = 1.85
+        i_binding = 1.0
+
+    total_bytes = sum(
+        float(op.bytes_transferred) * float(op.loop_multiplier)
+        for op in extract.operations
+    )
+    total_work = max(total_bytes, 1.0)
+    grid = GridBound(
+        t_grid_floor_us=total_work / (n_cores * occupancy * load_balance * i_binding),
+        total_work=total_work,
+        n_cores=n_cores,
+        occupancy=occupancy,
+        load_balance=load_balance,
+        redundancy=1.0,
+        i_binding=i_binding,
+        busiest_core_id=0,
+    )
+
+    serial = classify_handoffs(
+        extract.handoffs,
+        mandatory_handoff_cycles=mandatory_cycles,
+        clock_ghz=clock_ghz,
+    )
+
+    return combine(grid, comp, serial, kernel_name=kernel_name, extract=extract)
 
 
 # ── Gap helpers (diagnostic only — not part of the bound) ──────────────────

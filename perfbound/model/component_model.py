@@ -20,13 +20,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import TYPE_CHECKING, Dict, Optional
 
 from ..calibration.constants import (
     CubeConfig, VectorConfig, MemHierarchy, CoreConfig, DType, MemLoc, VecOpType,
 )
 from ..extract.hivm_extractor import HIVMExtract, OpRecord
 from ..extract.op_classifier import Component, Precision, HW_UNIT_TO_COMPONENT
+
+if TYPE_CHECKING:
+    from ..calibration.constants import CalibrationDB
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -310,4 +313,22 @@ def compute_component_floor(
         total_ops=total_ops,
         total_bytes=total_bytes,
         per_component_us=per_component_us,
+    )
+
+
+def compute_component_floor_from_db(
+    extract: HIVMExtract,
+    db: "CalibrationDB",
+) -> ComponentBound:
+    """Compute T_core_floor using rates from a CalibrationDB.
+
+    Convenience wrapper around compute_component_floor that unpacks
+    cube/vector/memory/core from the DB so callers need not destructure it.
+    """
+    return compute_component_floor(
+        extract,
+        db.cube,
+        db.vector,
+        db.memory,
+        db.core,
     )

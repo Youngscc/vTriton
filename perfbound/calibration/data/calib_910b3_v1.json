@@ -1,0 +1,199 @@
+{
+  "version": "v1",
+  "hardware_name": "Ascend 910B3",
+  "description": "Calibration database from CCE microbenchmarks",
+  "core": {
+    "aic_core_num": 20,
+    "aiv_core_num": 40,
+    "cv_bind": true,
+    "clock_freq_ghz": 1.85
+  },
+  "cube": {
+    "throughput": {
+      "fp16": 5.158556255844857,
+      "int8": 5.179265736685729,
+      "bf16": 5.1613579282632935
+    },
+    "fractal_sizes": {
+      "fp16": [
+        16,
+        16,
+        16
+      ],
+      "int8": [
+        16,
+        32,
+        16
+      ],
+      "bf16": [
+        16,
+        16,
+        16
+      ]
+    }
+  },
+  "vector": {
+    "vec_width_elements": 128,
+    "throughput_fp16_tflops": 0.015133235851136873,
+    "throughput_fp32_tflops": 0.0
+  },
+  "memory": {
+    "gm_size_gb": 32.0,
+    "l2_size_mb": 192.0,
+    "l1_size_kb": 1024.0,
+    "l0a_size_kb": 64.0,
+    "l0b_size_kb": 64.0,
+    "l0c_size_kb": 256.0,
+    "ub_size_kb": 256.0
+  },
+  "constants": {
+    "P_cube_fp16_sustained": {
+      "name": "P_cube_fp16_sustained",
+      "value": 5.158556255844857,
+      "unit": "TFLOPS",
+      "ci_95": 0.02815747215286201,
+      "source": "cce_microbench",
+      "n_runs": 45,
+      "notes": "M=128, N=128, K=4096, N_iter=30, CV=0.019"
+    },
+    "P_cube_int8_sustained": {
+      "name": "P_cube_int8_sustained",
+      "value": 5.179265736685729,
+      "unit": "TFLOPS",
+      "ci_95": 0.021375193522481847,
+      "source": "cce_microbench",
+      "n_runs": 45,
+      "notes": "M=128, N=128, K=4096, N_iter=30, CV=0.014"
+    },
+    "P_cube_bf16_sustained": {
+      "name": "P_cube_bf16_sustained",
+      "value": 5.1613579282632935,
+      "unit": "TFLOPS",
+      "ci_95": 0.02779747049635606,
+      "source": "cce_microbench",
+      "n_runs": 45,
+      "notes": "M=128, N=128, K=4096, N_iter=30, CV=0.018"
+    },
+    "P_vector_add_sustained": {
+      "name": "P_vector_add_sustained",
+      "value": 15.133235851136872,
+      "unit": "GFLOPS",
+      "ci_95": 0.024897791994296207,
+      "source": "cce_microbench",
+      "n_runs": 45,
+      "notes": "buffer=256, N_iter=10000, CV=0.006"
+    },
+    "P_vector_mul_sustained": {
+      "name": "P_vector_mul_sustained",
+      "value": 14.6480006649793,
+      "unit": "GFLOPS",
+      "ci_95": 0.0235741403369926,
+      "source": "cce_microbench",
+      "n_runs": 45,
+      "notes": "buffer=256, N_iter=10000, CV=0.006"
+    },
+    "P_vector_max_sustained": {
+      "name": "P_vector_max_sustained",
+      "value": 16.19215936903438,
+      "unit": "GFLOPS",
+      "ci_95": 0.0296509767520652,
+      "source": "cce_microbench",
+      "n_runs": 45,
+      "notes": "buffer=256, N_iter=10000, CV=0.006"
+    },
+    "P_vector_min_sustained": {
+      "name": "P_vector_min_sustained",
+      "value": 16.181346722882623,
+      "unit": "GFLOPS",
+      "ci_95": 0.029295735797370978,
+      "source": "cce_microbench",
+      "n_runs": 45,
+      "notes": "buffer=256, N_iter=10000, CV=0.006"
+    },
+    "P_vector_exp_sustained": {
+      "name": "P_vector_exp_sustained",
+      "value": 3.3286395599187757,
+      "unit": "GFLOPS",
+      "ci_95": 0.001087807467796042,
+      "source": "cce_microbench",
+      "n_runs": 45,
+      "notes": "buffer=256, N_iter=10000, CV=0.001"
+    },
+    "P_vector_log_sustained": {
+      "name": "P_vector_log_sustained",
+      "value": 3.3286395599187757,
+      "unit": "GFLOPS",
+      "ci_95": 0.001087807467796042,
+      "source": "cce_microbench",
+      "n_runs": 45,
+      "notes": "buffer=256, N_iter=10000, CV=0.001"
+    },
+    "P_vector_sqrt_sustained": {
+      "name": "P_vector_sqrt_sustained",
+      "value": 3.3286395599187757,
+      "unit": "GFLOPS",
+      "ci_95": 0.001087807467796042,
+      "source": "cce_microbench",
+      "n_runs": 45,
+      "notes": "buffer=256, N_iter=10000, CV=0.001"
+    },
+    "P_vector_rsqrt_sustained": {
+      "name": "P_vector_rsqrt_sustained",
+      "value": 3.3286395599187757,
+      "unit": "GFLOPS",
+      "ci_95": 0.001087807467796042,
+      "source": "cce_microbench",
+      "n_runs": 45,
+      "notes": "buffer=256, N_iter=10000, CV=0.001"
+    },
+    "BW_gm_to_ub_sustained": {
+      "name": "BW_gm_to_ub_sustained",
+      "value": 86.95384840495343,
+      "unit": "GB/s",
+      "ci_95": 0.17435775646602736,
+      "source": "cce_microbench",
+      "n_runs": 30,
+      "notes": "transfer=256.0KiB, N_iter=1280, steady_samples=30, CV=0.006"
+    },
+    "BW_ub_to_gm_sustained": {
+      "name": "BW_ub_to_gm_sustained",
+      "value": 86.84716593678523,
+      "unit": "GB/s",
+      "ci_95": 0.15935982626533707,
+      "source": "cce_microbench",
+      "n_runs": 30,
+      "notes": "transfer=256.0KiB, N_iter=1280, steady_samples=30, CV=0.005"
+    },
+    "BW_gm_to_l1_sustained": {
+      "name": "BW_gm_to_l1_sustained",
+      "value": 141.46686812526144,
+      "unit": "GB/s",
+      "ci_95": 0.26553350913053664,
+      "source": "cce_microbench",
+      "n_runs": 30,
+      "notes": "transfer=256.0KiB, N_iter=1280, steady_samples=30, CV=0.005"
+    },
+    "BW_l1_to_l0a_sustained": {
+      "name": "BW_l1_to_l0a_sustained",
+      "value": 451.78368040188457,
+      "unit": "GB/s",
+      "ci_95": 0.15501155853026688,
+      "source": "cce_microbench",
+      "n_runs": 30,
+      "notes": "transfer=256.0KiB, N_iter=1280, steady_samples=30, CV=0.001"
+    },
+    "mandatory_handoff_cost_l0c_to_gm_to_ub": {
+      "name": "mandatory_handoff_cost_l0c_to_gm_to_ub",
+      "value": 7620.865612052728,
+      "unit": "cycles",
+      "ci_95": 81.60501054310893,
+      "source": "cce_microbench",
+      "n_runs": 45,
+      "notes": "linear fit T(K)=\u03b1+\u03b2K, R\u00b2=0.9998, slope=0.006470"
+    }
+  },
+  "startup_latency": {},
+  "mandatory_handoff_cycles": 7620.865612052728,
+  "pipe_barrier_cycles_per_iter": 0.0,
+  "scalar_overhead_factor": 1.0
+}

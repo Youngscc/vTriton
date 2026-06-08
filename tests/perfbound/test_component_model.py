@@ -317,30 +317,33 @@ class TestEdgeCases:
 class TestIntegration:
     """End-to-end bound computation with known intermediate values."""
 
-    def test_matmul_bound_matches_golden(self, calibration, matmul_extract):
-        """MatMul-only kernel: MTE_GM binds, no serialization."""
-        from perfbound.model.component_model import compute_component_floor
-        from perfbound.model.grid_model import compute_grid_floor, GridBound
+    def test_matmul_bound_matches_golden(self, matmul_extract):
+        """MatMul-only kernel with real calibration: MTE_GM binds.
+
+        Arithmetic (real 910B3 A.1 constants):
+          MTE_GM bytes  = (128*32*2 + 32*64*2) * 32 = 12288 * 32 = 393216 B
+          BW_gm_to_ub   = 86.9538 GB/s = 86953.8 B/us
+          T_mte_gm      = 393216 / 86953.8 = 4.522 us  ← binds
+
+          Cube FP16     = 5.1586 TFLOPS = 5,158,560 FLOP/us
+          Cube ops      = 2*128*64*32 * 32 = 16,777,216 FLOP
+          T_cube        = 16,777,216 / 5,158,560 = 3.252 us
+
+          T_core_floor  = max(4.522, 3.252) = 4.522 us
+          T_grid_floor  = 409600 / (20 * 86953.8) = 0.236 us
+          T_bound       = max(4.522, 0.236) + 0 = 4.522 us
+        """
+        from perfbound.model.component_model import compute_component_floor_from_db
+        from perfbound.model.grid_model import GridBound
         from perfbound.model.serialization import classify_handoffs
         from perfbound.combine.bound_combiner import combine
-        from perfbound.extract.dsl_extractor import GridInfo
+        from perfbound.calibration.calib_loader import load_default_calib_db
 
-        comp = compute_component_floor(
-            matmul_extract,
-            calibration["cube"],
-            calibration["vector"],
-            calibration["memory"],
-            calibration["core"],
-        )
+        db = load_default_calib_db()
 
-        # Grid: uniform work, 512 programs, 20 cores, occupancy=1.0
-        grid_info = GridInfo(
-            grid_dims=(16, 32, 1), total_programs=512,
-            tile_assignment={}, work={p: 1.0 for p in range(512)},
-            occupancy=1.0, load_balance=1.0, redundancy=1.0,
-            busiest_core_id=0,
-        )
-        i_binding = calibration["memory"].lookup_bw("gm", "ub")[0]
+        comp = compute_component_floor_from_db(matmul_extract, db)
+
+        i_binding, _ = db.memory.lookup_bw("gm", "ub")
         total_bytes = sum(op.bytes_transferred * op.loop_multiplier
                          for op in matmul_extract.operations)
         grid = GridBound(
@@ -350,13 +353,13 @@ class TestIntegration:
             i_binding=i_binding, busiest_core_id=0,
         )
 
-        serial = classify_handoffs([], mandatory_handoff_cycles=2000, clock_ghz=1.85)
+        serial = classify_handoffs([], mandatory_handoff_cycles=0, clock_ghz=1.85)
 
         result = combine(grid, comp, serial, kernel_name="test_matmul")
 
-        # Golden: T_bound = max(0.114, 2.185) + 0 = 2.185 us
-        assert abs(result.t_bound_us - 2.185) < 0.02, \
-            f"T_bound {result.t_bound_us:.3f} not ~2.185 us"
+        # Golden: T_bound = max(0.236, 4.522) + 0 = 4.522 us
+        assert abs(result.t_bound_us - 4.522) < 0.02, \
+            f"T_bound {result.t_bound_us:.3f} not ~4.522 us"
         assert result.binding_tier.value == "component"
         assert result.binding_component == Component.MTE_GM
 

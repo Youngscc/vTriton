@@ -127,7 +127,7 @@ class CalibrationConstant:
     @property
     def is_valid(self) -> bool:
         """P0 constants require ≥30 runs with <5% relative CI."""
-        return self.n_runs >= 30 and self.ci_rel < 0.05
+        return self.n_runs >= 30 and self.ci_rel < 0.05 and self.source == "cce_microbench"
 
     def to_dict(self) -> dict:
         return {
@@ -365,10 +365,14 @@ class CalibrationDB:
     def validate_p0_constants(self) -> list[str]:
         """Return names of P0 constants that fail provenance checks."""
         violations = []
-        for name, c in self.constants.items():
+        for name in required_p0_constant_names():
+            c = self.constants.get(name)
+            if c is None:
+                violations.append(f"{name}: missing")
+                continue
             if not c.is_valid:
                 violations.append(
-                    f"{name}: n_runs={c.n_runs}, ci_rel={c.ci_rel:.3f}"
+                    f"{name}: source={c.source}, n_runs={c.n_runs}, ci_rel={c.ci_rel:.3f}"
                 )
         return violations
 
@@ -440,7 +444,7 @@ class CalibrationDB:
         )
         # Memory hierarchy
         mem_d = d.get("memory", {})
-        db.memory = MemHierarchy(
+        memory = MemHierarchy(
             gm_size_gb=mem_d.get("gm_size_gb", 32.0),
             l2_size_mb=mem_d.get("l2_size_mb", 192.0),
             l1_size_kb=mem_d.get("l1_size_kb", 1024.0),
@@ -449,6 +453,27 @@ class CalibrationDB:
             l0c_size_kb=mem_d.get("l0c_size_kb", 256.0),
             ub_size_kb=mem_d.get("ub_size_kb", 256.0),
         )
+
+        # Load bandwidth entries if present
+        bw_d = mem_d.get("bw", {})
+        if bw_d:
+            for bw_name, bw_data in bw_d.items():
+                if isinstance(bw_data, dict):
+                    src = bw_data.get("src_mem", "")
+                    dst = bw_data.get("dst_mem", "")
+                    core_num = bw_data.get("core_num", -1)
+                    key = (src, dst, core_num)
+                    memory.bw[key] = MemBandwidth(
+                        src_mem=src,
+                        dst_mem=dst,
+                        bw_gb_per_s=bw_data.get("bw_gb_per_s", 0.0),
+                        core_num=core_num,
+                        pkt_size=bw_data.get("pkt_size", -1),
+                        alignment_bytes=bw_data.get("alignment_bytes", 32),
+                        max_burst_bytes=bw_data.get("max_burst_bytes", 65536),
+                    )
+
+        db.memory = memory
         # Constants
         for name, cd in d.get("constants", {}).items():
             db.constants[name] = CalibrationConstant.from_dict(cd)
@@ -469,3 +494,25 @@ class CalibrationDB:
         """Save to a calib JSON file."""
         with open(path, "w") as f:
             json.dump(self.to_dict(), f, indent=2)
+
+
+def required_p0_constant_names() -> list[str]:
+    """Soundness-critical A.1 constants that must be measured before completion."""
+    return [
+        "P_cube_fp16_sustained",
+        "P_cube_int8_sustained",
+        "P_cube_bf16_sustained",
+        "P_vector_add_sustained",
+        "P_vector_mul_sustained",
+        "P_vector_max_sustained",
+        "P_vector_min_sustained",
+        "P_vector_exp_sustained",
+        "P_vector_log_sustained",
+        "P_vector_sqrt_sustained",
+        "P_vector_rsqrt_sustained",
+        "BW_gm_to_ub_sustained",
+        "BW_ub_to_gm_sustained",
+        "BW_gm_to_l1_sustained",
+        "BW_l1_to_l0a_sustained",
+        "mandatory_handoff_cost_l0c_to_gm_to_ub",
+    ]
