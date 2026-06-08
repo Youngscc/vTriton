@@ -87,6 +87,18 @@ struct HIVMAnalysisPass : public impl::HIVMAnalysisPassBase<HIVMAnalysisPass> {
       }
       report.emitPerfettoTrace(os, config);
     }
+
+    if (!desGraphFile.empty()) {
+      std::error_code ec;
+      llvm::raw_fd_ostream os(desGraphFile, ec, llvm::sys::fs::OF_Text);
+      if (ec) {
+        module.emitError() << "failed to open DES graph file `"
+                           << desGraphFile << "`: " << ec.message();
+        signalPassFailure();
+        return;
+      }
+      report.emitDESGraph(os, config);
+    }
   }
 };
 

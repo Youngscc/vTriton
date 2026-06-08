@@ -21,9 +21,29 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from .op_classifier import classify_op, Component, Precision
+
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_MTE_COMPONENTS = {"mte_gm", "mte_l1", "mte_ub"}
+
+# Canonical memory-space vocabulary — applied at load time so all
+# downstream consumers (handoffs, aggregation, A.4) see normalized names.
+_SPACE_NORMALIZE = {
+    "global": "gm", "hbm": "gm", "dram": "gm",
+    "l0a": "l0a", "l0b": "l0b", "l0c": "l0c",
+    "l1": "l1", "cube_l1": "l1",
+    "ub": "ub", "uniform_buffer": "ub",
+    "gm": "gm",
+}
+
+# Required fields in each DES graph operation entry.
+_DES_REQUIRED_FIELDS = ("id", "name", "pipe")
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +107,10 @@ class HIVMExtract:
 
     # Transfer metadata (Gap 2 input)
     transfer_sizes: Dict[str, List[int]] = field(default_factory=dict)
+    # Alignment per MTE transfer: 0 = unknown (C++ emitter does not yet
+    # expose address alignment).  When 0, Gap 2 must treat alignment as
+    # unknown rather than "aligned".  A non-zero value indicates the
+    # transfer's byte offset was confirmed aligned to that boundary.
     transfer_alignments: Dict[str, List[int]] = field(default_factory=dict)
 
     # Realized unit assignment (Gap 1 input)
@@ -104,12 +128,40 @@ class HIVMExtract:
 # ---------------------------------------------------------------------------
 
 def load_hivm_desgraph(path: Path | str) -> List[OpRecord]:
-    """Load HIVMAnalysis::emitDESGraph() JSON into OpRecord list."""
+    """Load HIVMAnalysis::emitDESGraph() JSON into OpRecord list.
+
+    Parses the canonical ``operations`` array emitted by the C++
+    ``HIVMAnalysisReport::emitDESGraph()`` method.  The legacy ``nodes``
+    key is accepted as a fallback for older emitters but is not preferred.
+
+    Raises:
+        ValueError: If the JSON contains neither ``operations`` nor ``nodes``,
+                    or if any operation is missing required fields.
+    """
     with open(path) as f:
         data = json.load(f)
 
-    ops = []
-    for node in data.get("nodes", []):
+    # Canonical key: "operations" (matches C++ emitDESGraph at HIVMAnalysis.cpp:3134)
+    raw_ops = data.get("operations")
+    if raw_ops is None:
+        # Legacy fallback for older emitters that used "nodes"
+        raw_ops = data.get("nodes")
+    if raw_ops is None:
+        raise ValueError(
+            "DES graph JSON must contain an 'operations' array "
+            "(or legacy 'nodes'). Found keys: "
+            + str(list(data.keys()))
+        )
+
+    ops: List[OpRecord] = []
+    for idx, node in enumerate(raw_ops):
+        # Validate required fields — fail fast on malformed JSON
+        missing = [f for f in _DES_REQUIRED_FIELDS if f not in node]
+        if missing:
+            raise ValueError(
+                f"DES graph operation at index {idx} missing required fields: "
+                f"{missing}. Got keys: {list(node.keys())}"
+            )
         comp, prec = classify_op(
             op_name=node.get("name", ""),
             pipe=node.get("pipe", ""),
@@ -123,13 +175,16 @@ def load_hivm_desgraph(path: Path | str) -> List[OpRecord]:
             pipe=node.get("pipe", ""),
             bytes_transferred=node.get("bytes", 0),
             elements=node.get("elements", 0),
+            flops=node.get("flops", 0),
             duration_cycles=node.get("duration", 0),
             loop_multiplier=node.get("loop_multiplier", 1),
             depends_on=node.get("depends_on", []),
-            src_space=node.get("src_space", ""),
-            dst_space=node.get("dst_space", ""),
+            src_space=_SPACE_NORMALIZE.get(node.get("src_space", ""), node.get("src_space", "")),
+            dst_space=_SPACE_NORMALIZE.get(node.get("dst_space", ""), node.get("dst_space", "")),
             repeat=node.get("repeat", 1),
             mask=node.get("mask", 0),
+            start_cycle=node.get("start_cycle", 0),
+            end_cycle=node.get("end_cycle", 0),
         ))
     return ops
 
@@ -163,6 +218,37 @@ def load_pipeline_depgraph(path: Path | str) -> List[OpRecord]:
     return ops
 
 
+def _compute_producer_component(
+    op_id: int,
+    op_by_id: Dict[int, OpRecord],
+) -> Optional[Component]:
+    """Trace through MTE intermediaries to find the ultimate compute producer.
+
+    For dependency chains like Cube → FixPipe(MTE_UB) → Vector, the immediate
+    edge is MTE_UB → Vector, but the canonical handoff for serialization
+    analysis is Cube → Vector.  This function walks backward through MTE
+    intermediaries to find the originating compute component.
+
+    Returns:
+        The compute Component of the ultimate producer, or None if the chain
+        does not reach a compute component.
+    """
+    visited = set()
+    current_id = op_id
+    while current_id in op_by_id:
+        if current_id in visited:
+            return None  # cycle guard
+        visited.add(current_id)
+        op = op_by_id[current_id]
+        if op.component.value not in _MTE_COMPONENTS:
+            return op.component
+        # MTE intermediary: trace its dependencies
+        if not op.depends_on:
+            return op.component  # MTE with no deps: use it as-is
+        current_id = op.depends_on[0]  # follow primary dependency
+    return None
+
+
 def extract_hivm(
     desgraph_path: Path | str,
     depgraph_path: Path | str | None = None,
@@ -190,26 +276,59 @@ def extract_hivm(
                 op.hw_unit = dep.hw_unit
                 op.flops = dep.flops
 
-    # Build handoff list: cross-component edges in depends_on
+    # Build handoff list: cross-component edges in depends_on.
+    #
+    # For each cross-component dependency, we emit two handoffs:
+    #   1. The immediate edge (e.g., MTE_UB → Vector) — for byte-level tracing.
+    #   2. The canonical compute-to-compute edge (e.g., Cube → Vector) —
+    #      traced through MTE intermediaries, used by serialization.py for
+    #      mandatory/avoidable classification.
     op_by_id = {op.op_id: op for op in ops}
-    handoffs = []
+    handoffs: List[HandoffRecord] = []
+
     for op in ops:
         for dep_id in op.depends_on:
-            if dep_id in op_by_id:
-                dep = op_by_id[dep_id]
-                if dep.component != op.component:
-                    handoffs.append(HandoffRecord(
-                        producer_op_id=dep_id,
-                        consumer_op_id=op.op_id,
-                        producer_component=dep.component,
-                        consumer_component=op.component,
-                        bytes_transferred=max(dep.bytes_transferred, op.bytes_transferred),
-                    ))
+            if dep_id not in op_by_id:
+                continue
+            dep = op_by_id[dep_id]
 
-    # Aggregate per-component O_prec
+            # Emit immediate cross-component handoff
+            if dep.component != op.component:
+                handoffs.append(HandoffRecord(
+                    producer_op_id=dep_id,
+                    consumer_op_id=op.op_id,
+                    producer_component=dep.component,
+                    consumer_component=op.component,
+                    bytes_transferred=max(dep.bytes_transferred, op.bytes_transferred),
+                ))
+
+                # Emit canonical compute-to-compute handoff if this is an
+                # MTE intermediary between two different compute components.
+                # E.g., Cube → FixPipe(MTE_UB) → Vector yields Cube → Vector.
+                if (op.component.value not in _MTE_COMPONENTS
+                        and dep.component.value in _MTE_COMPONENTS):
+                    producer_comp = _compute_producer_component(dep_id, op_by_id)
+                    if (producer_comp is not None
+                            and producer_comp != op.component):
+                        handoffs.append(HandoffRecord(
+                            producer_op_id=dep_id,
+                            consumer_op_id=op.op_id,
+                            producer_component=producer_comp,
+                            consumer_component=op.component,
+                            bytes_transferred=max(dep.bytes_transferred, op.bytes_transferred),
+                        ))
+
+    # Aggregate per-component O_prec and work totals.
+    #
+    # Compute components (cube, vector, scalar): O_prec counts ops/elements.
+    # MTE components (mte_gm, mte_l1, mte_ub): O_prec counts bytes transferred.
+    # This distinction is critical — counting MTE as elements corrupts the
+    # memory component floor used downstream (A.3 plan AC-2).
     o_prec: Dict[str, Dict[str, float]] = {}
     total_flops: Dict[str, int] = {}
     total_bytes: Dict[str, int] = {}
+    transfer_sizes: Dict[str, List[int]] = {}
+    transfer_alignments: Dict[str, List[int]] = {}
 
     for op in ops:
         comp_name = op.component.value
@@ -217,10 +336,36 @@ def extract_hivm(
 
         if comp_name not in o_prec:
             o_prec[comp_name] = {}
-        o_prec[comp_name][prec_name] = o_prec[comp_name].get(prec_name, 0) + op.elements
 
-        total_flops[comp_name] = total_flops.get(comp_name, 0) + op.flops * op.loop_multiplier
-        total_bytes[comp_name] = total_bytes.get(comp_name, 0) + op.bytes_transferred * op.loop_multiplier
+        if comp_name in _MTE_COMPONENTS:
+            # MTE: aggregate bytes (not elements!)
+            work_amount = op.bytes_transferred * op.loop_multiplier
+            o_prec[comp_name][prec_name] = (
+                o_prec[comp_name].get(prec_name, 0) + work_amount
+            )
+            # Transfer metadata (Gap 2 input)
+            if comp_name not in transfer_sizes:
+                transfer_sizes[comp_name] = []
+                transfer_alignments[comp_name] = []
+            transfer_sizes[comp_name].append(op.bytes_transferred)
+            # Alignment: 0 = unknown.  The C++ emitter does not yet expose
+            # address/offset alignment.  Gap 2 must treat 0 as "alignment
+            # unknown" — never as "confirmed aligned".
+            transfer_alignments[comp_name].append(0)
+        else:
+            # Compute: aggregate flops when available, otherwise elements
+            work_amount = op.flops if op.flops > 0 else op.elements
+            work_amount *= op.loop_multiplier
+            o_prec[comp_name][prec_name] = (
+                o_prec[comp_name].get(prec_name, 0) + work_amount
+            )
+
+        total_flops[comp_name] = (
+            total_flops.get(comp_name, 0) + op.flops * op.loop_multiplier
+        )
+        total_bytes[comp_name] = (
+            total_bytes.get(comp_name, 0) + op.bytes_transferred * op.loop_multiplier
+        )
 
     return HIVMExtract(
         operations=ops,
@@ -228,5 +373,7 @@ def extract_hivm(
         o_prec=o_prec,
         total_flops=total_flops,
         total_bytes=total_bytes,
+        transfer_sizes=transfer_sizes,
+        transfer_alignments=transfer_alignments,
         unit_assignment={op.op_id: op.component.value for op in ops},
     )

@@ -433,21 +433,26 @@ struct PipelineAnalysisPass
     llvm::outs() << "\n=== Utilization Report ===\n";
     scheduler.printUtilizationReport(llvm::outs());
     
-    // Generate trace with loop unrolling (limit to 100 iterations for visualization)
-    generatePerfettoTrace(scheduler, "pipeline_trace.json", oneIterCycles, rooflineTotalCycles, 100);
+    // Generate Perfetto trace only when an explicit path is provided.
+    // Replaces the old hard-coded "pipeline_trace.json" cwd write.
+    if (!perfettoTraceFile.empty()) {
+      generatePerfettoTrace(scheduler, perfettoTraceFile,
+                            oneIterCycles, rooflineTotalCycles);
+    }
 
     // Emit dependency graph JSON for downstream performance bound model consumers
     // (perfbound/model/serialization.py mandatory/avoidable split)
-    {
+    // Only writes when an explicit output path is provided — never pollutes cwd.
+    if (!dependencyGraphFile.empty()) {
       std::error_code depEC;
-      llvm::raw_fd_ostream depFile("pipeline_dep_graph.json", depEC,
+      llvm::raw_fd_ostream depFile(dependencyGraphFile, depEC,
                                     llvm::sys::fs::OF_Text);
       if (!depEC) {
         scheduler.emitDependencyGraphJSON(depFile);
-        llvm::outs() << "Dependency graph: pipeline_dep_graph.json\n";
+        llvm::outs() << "Dependency graph: " << dependencyGraphFile << "\n";
       } else {
-        llvm::errs() << "Warning: could not write pipeline_dep_graph.json: "
-                     << depEC.message() << "\n";
+        llvm::errs() << "Warning: could not write " << dependencyGraphFile
+                     << ": " << depEC.message() << "\n";
       }
     }
   }

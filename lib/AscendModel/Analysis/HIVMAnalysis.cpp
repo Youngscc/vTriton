@@ -3129,6 +3129,7 @@ void HIVMAnalysisReport::emitDESGraph(llvm::raw_ostream &os,
   };
 
   os << "{\n";
+  os << "  \"schema_version\": \"a3_hivm_des_v1\",\n";
   os << "  \"clock_ghz\": " << llvm::format("%.3f", config.getClockFrequencyGHz())
      << ",\n";
   os << "  \"operations\": [\n";
@@ -3140,6 +3141,8 @@ void HIVMAnalysisReport::emitDESGraph(llvm::raw_ostream &os,
        << ",\"name\":\"" << op.opName << "\""
        << ",\"pipe\":\"" << HIVMAnalyzer::stringifyPipe(op.pipe) << "\""
        << ",\"duration\":" << op.duration
+       << ",\"start_cycle\":" << op.startCycle
+       << ",\"end_cycle\":" << op.endCycle
        << ",\"line\":" << op.lineNumber
        << ",\"depends_on\":" << joinSizeVec(op.dependsOn)
        << ",\"is_sync\":" << (op.isSyncOp ? "true" : "false")

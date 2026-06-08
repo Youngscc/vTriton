@@ -71,7 +71,13 @@ def get_eligibility(
     rules = _ELIGIBILITY_RULES.get(op_category, {})
     if precision and precision in rules:
         return rules[precision]
-    return rules.get("default", frozenset({Component.SCALAR}))
+    if "default" in rules:
+        return rules["default"]
+    # Conservative: union all eligible sets for this category.
+    # If no rules at all, return all compute components (maximally conservative).
+    if not rules:
+        return frozenset({Component.CUBE, Component.VECTOR, Component.SCALAR})
+    return frozenset().union(*rules.values())
 
 
 def compute_gap1(

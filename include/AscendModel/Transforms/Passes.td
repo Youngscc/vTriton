@@ -133,7 +133,13 @@ def PipelineAnalysisPass : Pass<"analyze-pipeline", "ModuleOp"> {
            "Direct loop trip count overrides in order (e.g., '4,6588')">,
     Option<"hardwareConfigPath", "hardware-config", "std::string",
            /*default=*/"\"\"",
-           "Path to hardware configuration JSON file">
+           "Path to hardware configuration JSON file">,
+    Option<"dependencyGraphFile", "dependency-graph-file", "std::string",
+           /*default=*/"\"\"",
+           "Path to write dependency graph JSON (empty = do not write)">,
+    Option<"perfettoTraceFile", "perfetto-trace-file", "std::string",
+           /*default=*/"\"\"",
+           "Path to write Perfetto trace JSON (empty = do not write)">
   ];
 }
 
@@ -168,7 +174,10 @@ def HIVMAnalysisPass : Pass<"analyze-hivm", "ModuleOp"> {
            "Optional file to write the textual HIVM report to">,
     Option<"perfettoTraceFile", "perfetto-trace-file", "std::string",
            /*default=*/"\"\"",
-           "Optional Perfetto-compatible JSON trace output file">
+           "Optional Perfetto-compatible JSON trace output file">,
+    Option<"desGraphFile", "des-graph-file", "std::string",
+           /*default=*/"\"\"",
+           "Optional file to write the DES graph JSON to (for A.3 HIVM extraction)">
   ];
 }
 
