@@ -13,8 +13,55 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
+
+from ..combine.bound_combiner import BoundResult
+from ..extract.op_classifier import Component
+from .msprof_parser import parse_kernel_time_us, parse_component_durations
+
+
+class ValidationStatus(str, Enum):
+    """Tri-state validation outcome."""
+    PASS = "pass"                          # T_bound ≤ T_measured
+    BOUND_VIOLATION = "bound_violation"    # T_bound > T_measured (model bug)
+    EXECUTION_ERROR = "execution_error"    # compile/run/profiler infra failure
+    CORRECTNESS_FAILURE = "correctness_failure"  # output mismatch (A.6.2)
+
+
+@dataclass
+class ValidationCase:
+    """A single kernel to validate against the bound model.
+
+    Required fields:
+        kernel_name: Human-readable kernel identifier.
+        profiler_op_name: Op name to match in msprof CSV Op Name column.
+        bound_result: Precomputed bound from M5 (BoundResult).
+
+    A.6.1 measurement inputs:
+        csv_path: Path to local op_summary CSV (already synced from remote).
+
+    A.6.2 compile/correctness inputs (not used in A.6.1):
+        kernel_script: Path to kernel compilation/run script.
+        reference_fn: Callable that returns reference output for correctness check.
+        rtol/atol: Relative and absolute tolerance for correctness check.
+        n_warmup: Number of invocations to discard as warmup (default: 1).
+    """
+    kernel_name: str
+    profiler_op_name: str
+    bound_result: BoundResult
+
+    # A.6.1 — measurement inputs
+    csv_path: Path | None = None
+
+    # A.6.2 — compile/correctness inputs (not used in A.6.1)
+    kernel_script: Path | None = None
+    reference_fn: Callable | None = None
+    rtol: float = 1e-3
+    atol: float = 1e-5
+
+    n_warmup: int = 1
 
 
 @dataclass
@@ -24,11 +71,18 @@ class ValidationResult:
     t_bound_us: float
     t_measured_us: float
 
-    is_sound: bool                 # T_bound ≤ T_measured
-    tightness: float               # T_measured / T_bound
+    status: ValidationStatus = ValidationStatus.EXECUTION_ERROR
+    tightness: float = 0.0               # T_measured / T_bound
 
-    msprof_source: str = ""        # path to op_summary CSV
+    n_invocations: int = 0               # valid invocations used in median
+    component_match: bool | None = None  # measured dominant component matches predicted
+    msprof_source: str = ""              # path to op_summary CSV
     notes: str = ""
+
+    @property
+    def is_sound(self) -> bool:
+        """Backward compat: T_bound ≤ T_measured (PASS status)."""
+        return self.status == ValidationStatus.PASS
 
 
 @dataclass
@@ -38,17 +92,29 @@ class ValidationSuite:
 
     @property
     def soundness_rate(self) -> float:
-        """Fraction of kernels where T_bound ≤ T_measured."""
-        if not self.results:
+        """Fraction of valid measurements where T_bound ≤ T_measured.
+
+        Soundness statistics must exclude non-PASS and non-BOUND_VIOLATION rows
+        from the denominator. Only PASS + BOUND_VIOLATION count as valid measurements.
+        """
+        valid = [
+            r for r in self.results
+            if r.status in (ValidationStatus.PASS, ValidationStatus.BOUND_VIOLATION)
+        ]
+        if not valid:
             return 0.0
-        return sum(1 for r in self.results if r.is_sound) / len(self.results)
+        return sum(1 for r in valid if r.status == ValidationStatus.PASS) / len(valid)
 
     @property
     def median_tightness(self) -> float:
-        """Median T_measured / T_bound (on optimized kernels)."""
-        if not self.results:
+        """Median T_measured / T_bound (on valid measurements only)."""
+        valid = [
+            r for r in self.results
+            if r.status in (ValidationStatus.PASS, ValidationStatus.BOUND_VIOLATION)
+        ]
+        if not valid:
             return 0.0
-        sorted_t = sorted(r.tightness for r in self.results)
+        sorted_t = sorted(r.tightness for r in valid)
         n = len(sorted_t)
         if n % 2 == 0:
             return (sorted_t[n // 2 - 1] + sorted_t[n // 2]) / 2
@@ -57,41 +123,216 @@ class ValidationSuite:
     @property
     def violations(self) -> List[ValidationResult]:
         """Kernels where the bound was violated (unsound)."""
-        return [r for r in self.results if not r.is_sound]
+        return [r for r in self.results if r.status == ValidationStatus.BOUND_VIOLATION]
 
     def summary(self) -> str:
+        valid_count = sum(
+            1 for r in self.results
+            if r.status in (ValidationStatus.PASS, ValidationStatus.BOUND_VIOLATION)
+        )
+        pass_count = sum(1 for r in self.results if r.status == ValidationStatus.PASS)
         lines = [
             f"=== Validation Suite Results ===",
             f"Total kernels: {len(self.results)}",
-            f"Soundness: {self.soundness_rate:.1%} ({sum(1 for r in self.results if r.is_sound)}/{len(self.results)})",
+            f"Valid measurements: {valid_count}",
+            f"Soundness: {self.soundness_rate:.1%} ({pass_count}/{valid_count})",
             f"Median tightness: {self.median_tightness:.3f}",
         ]
         if self.violations:
-            lines.append(f"VIOLATIONS ({len(self.violations)}):")
+            lines.append(f"BOUND VIOLATIONS ({len(self.violations)}):")
             for v in self.violations:
-                lines.append(f"  {v.kernel_name}: T_bound={v.t_bound_us:.2f} > T_measured={v.t_measured_us:.2f}")
+                lines.append(
+                    f"  {v.kernel_name}: T_bound={v.t_bound_us:.2f} > T_measured={v.t_measured_us:.2f}"
+                )
+        # Component match summary
+        comp_results = [r for r in self.results if r.component_match is not None]
+        if comp_results:
+            match_count = sum(1 for r in comp_results if r.component_match)
+            lines.append(f"Component match: {match_count}/{len(comp_results)}")
         return "\n".join(lines)
 
 
+# ── Component match helper ─────────────────────────────────────────────
+
+_COMPONENT_TO_CATEGORY = {
+    Component.CUBE: "aicore",
+    Component.VECTOR: "aicore",
+    Component.MTE_GM: "mte",
+    Component.MTE_L1: "mte",
+    Component.MTE_UB: "mte",
+    Component.SCALAR: "aicpu",
+}
+
+
+def _check_component_match(
+    comp_durations: dict[str, float],
+    predicted_component: Component | None,
+) -> bool | None:
+    """Check if measured dominant component matches predicted.
+
+    Args:
+        comp_durations: Dict from parse_component_durations().
+        predicted_component: BoundResult.binding_component (or None).
+
+    Returns:
+        True if dominant measured matches expected, False if mismatch,
+        None if task_type fields are all empty (old CSV).
+    """
+    if predicted_component is None:
+        return None
+
+    # Check if all durations are zero (old CSV without task_type)
+    total = sum(comp_durations.values())
+    if total <= 0:
+        return None
+
+    # Find dominant measured category
+    dominant_measured = max(comp_durations, key=comp_durations.get)
+
+    # Map predicted component to expected category
+    expected_category = _COMPONENT_TO_CATEGORY.get(predicted_component)
+    if expected_category is None:
+        return None
+
+    return dominant_measured == expected_category
+
+
+# ── CSV-based validation (Level A, no hardware) ────────────────────────
+
+def validate_from_csv(case: ValidationCase) -> ValidationResult:
+    """Validate a single kernel from a local msprof CSV.
+
+    Args:
+        case: ValidationCase with csv_path and bound_result.
+
+    Returns:
+        ValidationResult with PASS/BOUND_VIOLATION/EXECUTION_ERROR status.
+    """
+    # Check CSV path
+    if case.csv_path is None or not Path(case.csv_path).exists():
+        return ValidationResult(
+            kernel_name=case.kernel_name,
+            t_bound_us=case.bound_result.t_bound_us,
+            t_measured_us=0.0,
+            status=ValidationStatus.EXECUTION_ERROR,
+            notes="csv_path missing or not found",
+            msprof_source=str(case.csv_path) if case.csv_path else "",
+        )
+
+    # Check bound validity
+    if case.bound_result.t_bound_us <= 0:
+        return ValidationResult(
+            kernel_name=case.kernel_name,
+            t_bound_us=case.bound_result.t_bound_us,
+            t_measured_us=0.0,
+            status=ValidationStatus.EXECUTION_ERROR,
+            notes=f"invalid bound: t_bound_us={case.bound_result.t_bound_us} <= 0",
+            msprof_source=str(case.csv_path),
+        )
+
+    # Parse timing
+    try:
+        timing = parse_kernel_time_us(
+            case.csv_path, case.profiler_op_name, case.n_warmup
+        )
+    except (ValueError, OSError) as e:
+        return ValidationResult(
+            kernel_name=case.kernel_name,
+            t_bound_us=case.bound_result.t_bound_us,
+            t_measured_us=0.0,
+            status=ValidationStatus.EXECUTION_ERROR,
+            notes=str(e),
+            msprof_source=str(case.csv_path),
+        )
+
+    # Check bound violation
+    is_violation = case.bound_result.t_bound_us > timing.t_us
+
+    # Check component match (filtered to this kernel's rows)
+    try:
+        comp_durations = parse_component_durations(
+            case.csv_path, op_name_filter=case.profiler_op_name
+        )
+        component_match = _check_component_match(
+            comp_durations, case.bound_result.binding_component
+        )
+    except (ValueError, OSError):
+        component_match = None
+
+    return ValidationResult(
+        kernel_name=case.kernel_name,
+        t_bound_us=case.bound_result.t_bound_us,
+        t_measured_us=timing.t_us,
+        n_invocations=timing.n_invocations,
+        status=ValidationStatus.BOUND_VIOLATION if is_violation else ValidationStatus.PASS,
+        tightness=timing.t_us / case.bound_result.t_bound_us,
+        msprof_source=str(case.csv_path),
+        component_match=component_match,
+    )
+
+
+# ── Remote validation (Level B, hardware) ──────────────────────────────
+
 def run_validation(
-    kernel_list: List[str],
-    bound_function,
-    remote_bench_skill=None,
+    cases: List[ValidationCase],
+    remote_host: str | None = None,
+    remote_bench_script: str | None = None,
 ) -> ValidationSuite:
     """Compile, run, profile, and validate a list of kernels.
 
+    Level B (hardware): delegates to scripts/remote_bench.py for remote
+    sync + profile. For each case: sync → run msprof → sync back CSV →
+    call validate_from_csv(case).
+
     Args:
-        kernel_list: List of kernel names or paths to validate.
-        bound_function: Callable(kernel_name) → BoundResult.
-        remote_bench_skill: Optional remote-bench-910b3 skill reference.
+        cases: List of ValidationCase to validate.
+        remote_host: Remote 910B3 host (SSH). If None, assumes CSVs are local.
+        remote_bench_script: Path to scripts/remote_bench.py.
 
     Returns:
         ValidationSuite with per-kernel soundness/tightness.
-
-    Raises:
-        NotImplementedError: Harness not yet implemented.
     """
-    raise NotImplementedError(
-        "Validation harness not yet implemented. "
-        "Requires remote-bench-910b3 skill integration and M5 combiner."
-    )
+    suite = ValidationSuite()
+
+    for case in cases:
+        if remote_host and remote_bench_script:
+            # Remote execution: sync, profile, fetch CSV
+            try:
+                import subprocess
+                import tempfile
+
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    csv_path = Path(tmpdir) / f"{case.kernel_name}_op_summary.csv"
+
+                    # Call remote_bench.py
+                    cmd = [
+                        "python3", remote_bench_script,
+                        "--host", remote_host,
+                        "--kernel", case.kernel_name,
+                        "--output", str(csv_path),
+                    ]
+                    if case.kernel_script:
+                        cmd.extend(["--script", str(case.kernel_script)])
+
+                    subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+                    # Update case with fetched CSV
+                    case.csv_path = csv_path
+                    result = validate_from_csv(case)
+
+            except Exception as e:
+                # Infrastructure failure → EXECUTION_ERROR (never BOUND_VIOLATION)
+                result = ValidationResult(
+                    kernel_name=case.kernel_name,
+                    t_bound_us=case.bound_result.t_bound_us,
+                    t_measured_us=0.0,
+                    status=ValidationStatus.EXECUTION_ERROR,
+                    notes=f"remote execution failed: {e}",
+                )
+        else:
+            # Local CSV already present
+            result = validate_from_csv(case)
+
+        suite.results.append(result)
+
+    return suite

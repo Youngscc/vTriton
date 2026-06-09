@@ -68,6 +68,8 @@ class MSProfRow:
     cycles: float
     task_id: int = 0
     core_id: int = 0
+    task_type: str = ""          # "AI_CORE", "AI_CPU", "AIV", etc.
+    start_time_us: float = 0.0   # Task Start Time(us)
 
 
 def read_msprof_csv(csv_path: Path) -> List[MSProfRow]:
@@ -92,6 +94,16 @@ def read_msprof_csv(csv_path: Path) -> List[MSProfRow]:
                     )),
                     task_id=int(float(_first_present(line, ["task_id", "Task ID"], "0"))),
                     core_id=int(float(_first_present(line, ["core_id", "Core ID"], "0"))),
+                    task_type=_first_present(
+                        line,
+                        ["task_type", "Task Type", "TaskType"],
+                        "",
+                    ),
+                    start_time_us=float(_first_present(
+                        line,
+                        ["start_time(us)", "Task Start Time(us)", "StartTime(us)"],
+                        "0",
+                    )),
                 )
                 rows.append(row)
             except (ValueError, KeyError) as e:

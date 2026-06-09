@@ -45,9 +45,15 @@ class KernelReport:
 
     # Two-limit (A.7)
     t_bound_hivm_us: Optional[float] = None
+    t_bound_dsl_us: Optional[float] = None
     t_measured_us: Optional[float] = None
     compiler_headroom_us: Optional[float] = None
     author_headroom_us: Optional[float] = None
+
+    # Measurement metadata
+    msprof_source: Optional[str] = None
+    n_invocations: Optional[int] = None
+    component_match: Optional[bool] = None
 
     # Attribution (five-way, fractions of T_bound)
     attribution: dict[str, float] = field(default_factory=dict)
@@ -56,7 +62,7 @@ class KernelReport:
     recommended_action: str = "unknown"
 
     def to_dict(self) -> dict:
-        return {
+        base = {
             "kernel_name": self.kernel_name,
             "t_bound_us": self.t_bound_us,
             "binding_tier": self.binding_tier,
@@ -71,6 +77,24 @@ class KernelReport:
             "attribution": self.attribution,
             "recommended_action": self.recommended_action,
         }
+        # A.6.1 reachability block
+        is_violation = (
+            self.t_measured_us is not None
+            and self.t_bound_dsl_us is not None
+            and self.t_bound_dsl_us > self.t_measured_us
+        )
+        base["reachability"] = {
+            "t_bound_hivm_us": self.t_bound_hivm_us,
+            "t_bound_dsl_us": self.t_bound_dsl_us,
+            "t_measured_us": self.t_measured_us,
+            "compiler_headroom_us": self.compiler_headroom_us,
+            "author_headroom_us": self.author_headroom_us,
+            "is_violation": is_violation,
+            "msprof_source": self.msprof_source,
+            "n_invocations": self.n_invocations,
+            "component_match": self.component_match,
+        }
+        return base
 
     def to_json(self, path: str | Path | None = None) -> str:
         """Serialize to JSON string, optionally writing to a file."""
@@ -99,14 +123,54 @@ class KernelReport:
         for gap_name, frac in sorted(self.attribution.items(), key=lambda x: -x[1]):
             lines.append(f"  {gap_name}: {frac:.3f}")
 
-        if self.t_bound_hivm_us is not None:
-            lines.append(f"")
-            lines.append(f"Two-Limit (A.7):")
-            lines.append(f"  T_bound_HIVM:       {self.t_bound_hivm_us:.2f} us")
+        # Reachability Hierarchy (three-level)
+        lines.append(f"")
+        lines.append(f"Reachability Hierarchy:")
+        lines.append(f"  1. Hardware floor  (T_bound_HIVM):  "
+                     f"{self.t_bound_hivm_us:.2f} us" if self.t_bound_hivm_us is not None
+                     else "  1. Hardware floor  (T_bound_HIVM):  N/A")
+
+        dsl_line = f"  2. DSL bound       (T_bound_DSL):   "
+        if self.t_bound_dsl_us is not None:
+            dsl_line += f"{self.t_bound_dsl_us:.2f} us"
             if self.compiler_headroom_us is not None:
-                lines.append(f"  Compiler headroom:  {self.compiler_headroom_us:.2f} us")
-            if self.author_headroom_us is not None:
-                lines.append(f"  Author headroom:    {self.author_headroom_us:.2f} us")
+                dsl_line += f"   [compiler headroom: {self.compiler_headroom_us:.2f} us]"
+        else:
+            dsl_line += "N/A"
+        lines.append(dsl_line)
+
+        meas_line = f"  3. Measured        (T_measured):    "
+        if self.t_measured_us is not None:
+            # Check for bound violation
+            if (self.t_bound_dsl_us is not None
+                    and self.t_bound_dsl_us > self.t_measured_us):
+                meas_line += (
+                    f"{self.t_measured_us:.2f} us   "
+                    f"*** BOUND VIOLATION: T_bound={self.t_bound_dsl_us:.2f} > T_measured ***"
+                )
+            else:
+                meas_line += f"{self.t_measured_us:.2f} us"
+                if self.author_headroom_us is not None:
+                    meas_line += f"   [author headroom: {self.author_headroom_us:.2f} us]"
+            lines.append(meas_line)
+            # Source + invocations
+            source_line = ""
+            if self.msprof_source:
+                source_line += f"     source: {self.msprof_source}"
+            if self.n_invocations is not None:
+                source_line += f"  n={self.n_invocations} invocations"
+            if source_line:
+                lines.append(source_line)
+            # Component match
+            if self.component_match is not None:
+                match_sym = "✓" if self.component_match else "✗"
+                pred = self.binding_component if self.binding_component else "unknown"
+                lines.append(
+                    f"     binding component: predicted={pred}, match={match_sym}"
+                )
+        else:
+            meas_line += "not yet measured"
+            lines.append(meas_line)
 
         lines.append(f"")
         lines.append(f"Recommended action: {self.recommended_action}")
@@ -145,6 +209,7 @@ class KernelReport:
             t_core_floor_us=result.t_core_floor_us,
             t_serial_irreducible_us=result.t_serial_irreducible_us,
             t_bound_hivm_us=two_limit.t_bound_hivm_us if two_limit else None,
+            t_bound_dsl_us=two_limit.t_bound_dsl_us if two_limit else result.t_bound_us,
             t_measured_us=two_limit.t_measured_us if two_limit else None,
             compiler_headroom_us=two_limit.compiler_headroom_us if two_limit else None,
             author_headroom_us=two_limit.author_headroom_us if two_limit else None,
@@ -157,3 +222,30 @@ class KernelReport:
             },
             recommended_action=action,
         )
+
+    def merge_validation(
+        self,
+        t_measured_us: float,
+        msprof_source: str = "",
+        n_invocations: int = 0,
+        component_match: bool | None = None,
+    ) -> None:
+        """Merge measurement provenance from ValidationResult into this report.
+
+        Called by run_report when a measured CSV is provided.  Copies the
+        three provenance fields (msprof_source, n_invocations, component_match)
+        and updates t_measured_us + author_headroom_us.
+
+        Args:
+            t_measured_us: Measured kernel time from msprof.
+            msprof_source: Path to op_summary CSV.
+            n_invocations: Valid invocations used in median.
+            component_match: Whether dominant measured component matches predicted.
+        """
+        self.t_measured_us = t_measured_us
+        self.msprof_source = msprof_source or None
+        self.n_invocations = n_invocations or None
+        self.component_match = component_match
+        # Recompute author headroom
+        if self.t_bound_dsl_us is not None:
+            self.author_headroom_us = t_measured_us - self.t_bound_dsl_us

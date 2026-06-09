@@ -110,6 +110,41 @@ def test_extract_all_constants_from_synthetic_measured_csvs(tmp_path):
     assert "gm,ub,-1,-1,sustained,180" in csv_path.read_text()
 
 
+def test_read_msprof_csv_parses_task_type_and_start_time(tmp_path):
+    """A.6.1 new fields: Task Type and Task Start Time(us) are parsed."""
+    csv_path = tmp_path / "op_summary.csv"
+    csv_path.write_text(
+        "Op Name,Task Type,Task Start Time(us),Task Duration(us),OP Type\n"
+        "kernel_a,AI_CORE,1000.5,200.0,SomeOp\n"
+        "kernel_b,MTE,2000.0,50.0,MteOp\n"
+    )
+
+    rows = read_msprof_csv(csv_path)
+
+    assert len(rows) == 2
+    assert rows[0].task_type == "AI_CORE"
+    assert rows[0].start_time_us == 1000.5
+    assert rows[0].op_name == "kernel_a"
+    assert rows[0].duration_us == 200.0
+    assert rows[1].task_type == "MTE"
+    assert rows[1].start_time_us == 2000.0
+
+
+def test_read_msprof_csv_defaults_for_missing_new_fields(tmp_path):
+    """Old CSV without Task Type / Start Time columns → defaults to '' / 0.0."""
+    csv_path = tmp_path / "op_summary.csv"
+    csv_path.write_text(
+        "op_name,op_type,duration(us),cycles,task_id,core_id\n"
+        "cube,bench,1.25,2312.5,7,3\n"
+    )
+
+    rows = read_msprof_csv(csv_path)
+
+    assert len(rows) == 1
+    assert rows[0].task_type == ""
+    assert rows[0].start_time_us == 0.0
+
+
 def test_mte_extraction_keeps_fastest_two_thirds(tmp_path):
     csv_path = tmp_path / "mte_gm_to_ub.csv"
     fast_duration = _mte_duration_for(180.0)

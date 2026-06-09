@@ -70,6 +70,7 @@ def report_from_desgraph(
     occupancy: float = 1.0,
     load_balance: float = 1.0,
     kernel_name: str = "unknown",
+    t_measured_us: float | None = None,
 ) -> KernelReport:
     """Build a full A.5 report from an existing DES graph JSON.
 
@@ -109,6 +110,7 @@ def report_from_desgraph(
         extract=extract,
         calib_db=calib_db,
         t_bound_dsl_us=result.t_bound_us,
+        t_measured_us=t_measured_us,
         n_cores=n_cores,
         total_programs=total_programs,
     )
@@ -127,6 +129,7 @@ def report_from_npuir(
     kernel_name: str = "unknown",
     tritonsim_hivm: str = "tritonsim-hivm",
     python_path: str = sys.executable,
+    t_measured_us: float | None = None,
 ) -> KernelReport:
     """Build a full A.5 report by first running tritonsim-hivm on an NPU IR file.
 
@@ -182,6 +185,7 @@ def report_from_npuir(
         occupancy=occupancy,
         load_balance=load_balance,
         kernel_name=kernel_name,
+        t_measured_us=t_measured_us,
     )
 
 
@@ -212,6 +216,12 @@ def _cli():
                         help="Path to tritonsim-hivm binary")
     parser.add_argument("--python", default=sys.executable,
                         help="Python interpreter for tritonsim-hivm")
+    parser.add_argument("--measured-us", type=float, default=None,
+                        help="Measured kernel time in microseconds (from msprof)")
+    parser.add_argument("--measured-csv", default=None,
+                        help="Path to msprof op_summary CSV (extracts timing + component match)")
+    parser.add_argument("--measured-op-name", default=None,
+                        help="Op name filter for measured CSV (default: --kernel-name)")
     parser.add_argument("--output-json",
                         help="Write report JSON to this path")
 
@@ -229,6 +239,7 @@ def _cli():
             occupancy=args.occupancy,
             load_balance=args.load_balance,
             kernel_name=args.kernel_name,
+            t_measured_us=args.measured_us,
         )
     else:
         report = report_from_npuir(
@@ -242,12 +253,77 @@ def _cli():
             kernel_name=args.kernel_name,
             tritonsim_hivm=args.tritonsim_hivm,
             python_path=args.python,
+            t_measured_us=args.measured_us,
         )
+
+    # Bridge: if --measured-csv provided, run full validation (not just bare float)
+    if args.measured_csv:
+        op_name = args.measured_op_name or args.kernel_name
+        _merge_validation_from_csv(report, args.measured_csv, op_name)
 
     print(report.to_text())
     if args.output_json:
         report.to_json(args.output_json)
         print(f"\nJSON written to {args.output_json}")
+
+
+# ── Validation bridge ──────────────────────────────────────────────────
+
+def _merge_validation_from_csv(
+    report: KernelReport,
+    csv_path: str | Path,
+    profiler_op_name: str,
+    n_warmup: int = 1,
+) -> None:
+    """Run validate_from_csv and merge provenance into report in-place.
+
+    Bridges the gap between the validation harness (which computes timing,
+    component match, and provenance) and KernelReport (which renders them).
+    Without this bridge, the CLI path only passes a bare float (--measured-us)
+    and the source/invocations/component-match fields never surface.
+
+    Args:
+        report: KernelReport to mutate in-place.
+        csv_path: Path to msprof op_summary CSV.
+        profiler_op_name: Op name to match in CSV.
+        n_warmup: Invocations to discard as warmup.
+    """
+    from ..validate.harness import ValidationCase, validate_from_csv, ValidationStatus
+
+    # Build a minimal BoundResult for ValidationCase
+    from .bound_combiner import BoundResult as _BR, BindingTier as _BT, Attribution as _Attr
+    from ..extract.op_classifier import Component as _Comp
+
+    bound_result = _BR(
+        kernel_name=report.kernel_name,
+        t_bound_us=report.t_bound_us,
+        t_grid_floor_us=report.t_grid_floor_us,
+        t_core_floor_us=report.t_core_floor_us,
+        t_serial_irreducible_us=report.t_serial_irreducible_us,
+        binding_tier=_BT(report.binding_tier),
+        binding_component=_Comp(report.binding_component) if report.binding_component else None,
+        attribution=_Attr(),
+    )
+    case = ValidationCase(
+        kernel_name=report.kernel_name,
+        profiler_op_name=profiler_op_name,
+        bound_result=bound_result,
+        csv_path=Path(csv_path),
+        n_warmup=n_warmup,
+    )
+    vr = validate_from_csv(case)
+
+    if vr.status in (ValidationStatus.PASS, ValidationStatus.BOUND_VIOLATION):
+        report.merge_validation(
+            t_measured_us=vr.t_measured_us,
+            msprof_source=vr.msprof_source,
+            n_invocations=vr.n_invocations,
+            component_match=vr.component_match,
+        )
+    else:
+        # EXECUTION_ERROR: still set t_measured_us=None to signal failure
+        import sys
+        print(f"Warning: validation failed ({vr.notes})", file=sys.stderr)
 
 
 if __name__ == "__main__":

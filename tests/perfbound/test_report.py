@@ -122,7 +122,7 @@ class TestReportRoundTrip:
         assert "Performance Bound Report" in text
 
     def test_two_limit_in_report(self):
-        """When two_limit is provided, report includes HIVM bound."""
+        """When two_limit is provided, report includes HIVM bound in Reachability Hierarchy."""
         from perfbound.combine.two_limit import TwoLimitResult
         result = _make_result(t_bound=100.0)
         tl = TwoLimitResult(
@@ -134,4 +134,5 @@ class TestReportRoundTrip:
         assert report.t_bound_hivm_us == pytest.approx(80.0)
         assert report.compiler_headroom_us == pytest.approx(20.0)
         text = report.to_text()
-        assert "Two-Limit" in text
+        assert "Reachability Hierarchy" in text
+        assert "Hardware floor" in text
