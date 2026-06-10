@@ -16,15 +16,21 @@
 | **A.2** | M2 DSL Extractor — symbolic affine recovery from TTIR | Wk 2–3 | ✅ **Complete** — C++ MLIR pass + 10 reference kernels verified (63/63 tests) |
 | **A.3** | M3 HIVM Extractor — C++ JSON round-trip verified | Wk 3–5 | ✅ **Complete** — DES schema fix, MTE byte aggregation, handoff tracing (108/108 tests) |
 | **A.4** | M4 Two Analytical Models — units discipline + compute_bounds driver | Wk 5–7 | ✅ **Complete** — flops consumption, distinct-edge serialization, 144/144 tests |
-| **A.5** | M5 Combiner — Gap 1/2/4 wired, Gap 3 from real handoffs | Wk 7 | ✅ Code complete (untested on real data) |
-| **A.6** | M6 Validation Harness — remote-bench-910b3 integration | Wk 6–9 | ⛔ Stub (hardware-gated) |
-| **A.7** | Two-limit computation (`T_bound_HIVM` vs `T_bound_DSL`) | Wk 8 | ⛔ Stub (deferred) |
-| **A.8** | End-to-end pipeline verified on ≥1 real kernel | Wk 9 | ⛔ Not started |
+| **A.5** | M5 Combiner — Gap 1/2/4 wired, Gap 3 from real handoffs | Wk 7 | ✅ **Complete** — combiner, 5-way attribution, two-limit, real-kernel milestone (committed `dffda87`) |
+| **A.6** | M6 Validation Harness — measurement + counterfactual | Wk 6–9 | ✅ **Software complete** — A.6.1 measurement (`174d0ab`) + A.6.2 counterfactual/remote runner; live runs hardware-gated |
+| **A.7** | Two-limit computation (`T_bound_HIVM` vs `T_bound_DSL`) | Wk 8 | ✅ **Complete** — delivered within A.5 (`two_limit.py`, reachability hierarchy) |
+| **A.8** | End-to-end pipeline verified on ≥1 real kernel | Wk 9 | 🟡 Partial — mixed-CV kernel pipeline green; chunk_kda blocked by bishengir compiler bug |
 | **Part B** | Experiments, paper writing, iterate calibration | Wk 9–12 | ⛔ Not started |
 
 ---
 
-## Current State (2026-06-09)
+## Current State (2026-06-10)
+
+> A.5 → A.6.2 landed since the snapshot below. The "What's done" list covers
+> A.0–A.4; see the **A.5** and **A.6** completion sections lower down for the
+> combiner, attribution, two-limit, and validation harness. Full `perfbound/`
+> suite: **311 passed, 3 skipped, 2 xfailed** (the 2 xfails are the bishengir
+> compiler bug).
 
 ### What's done
 
@@ -47,10 +53,12 @@
 
 | Item | Blocker | Priority |
 |------|---------|----------|
-| Gap 3 (avoidable serialization) computation | Needs real kernel data + handoff classification | P1 |
-| Gap 4 wire through (C++ emitter `repeat`/`mask`) | C++ emitter doesn't emit these fields yet | P1 |
-| Two-limit computation (`two_limit.py`) | Deferred to A.7 (Wk 8) | P2 |
-| M6 validation harness | remote-bench-910b3 skill integration | P2 |
+| chunk_kda compile → DES graph | bishengir `ConvertLinalgRToBinary` crash (CANN 9.0.0-beta.2) — third-party compiler bug | P1 |
+| Live 910B3 validation / counterfactual runs | Real device; plumbing complete + offline-tested, awaits hardware | P2 |
+| Gap 4 from C++ emitter `repeat`/`mask` | C++ emitter still defaults these (model reads them; emitter doesn't populate yet) | P2 |
+| Scalar throughput (Vector/20 proxy) | Needs real Scalar calibration (B.4) before trusting as a lower bound | P2 |
+
+**Closed since A.4**: Gap 3 (avoidable serialization, A.5) · Two-limit / A.7 (`two_limit.py`, A.5) · M6 measurement + counterfactual harness (A.6.1/A.6.2).
 
 ### Recently closed (A.3/A.4)
 
@@ -108,7 +116,42 @@
 
 ---
 
-## Next Milestone: A.5 — Bound Combiner & Attribution (Wk 7)
+## Completed: A.6 — Validation Harness (2026-06-10)
+
+**Detail log**: `.omc/plans/a6_progress.md` · **Blocker scoping**: `.omc/plans/a6_2_blockers_scope.md`
+
+M6 splits into measurement (A.6.1) and counterfactual (A.6.2); both software-complete.
+The only remaining work is hardware/compiler-gated (a live 910B3 run + the CANN
+compiler bug), tracked by xfail/spike tests.
+
+| Part | Step | Status |
+|------|------|--------|
+| A.6.1 | msprof CSV parser (AiCore filter, invocation grouping, max-per-invocation, warmup discard, median) | ✅ Done (13 tests) |
+| A.6.1 | Tri-state harness (`ValidationStatus`; infra errors excluded from soundness) | ✅ Done (7 tests) |
+| A.6.1 | Three-level reachability report (HIVM/DSL/measured + provenance, component match) | ✅ Done (11 tests) |
+| A.6.2 | HIVM edit primitives + no-op guards + extract-reversibility check | ✅ Done (23 tests) |
+| A.6.2 | Output correctness verification (numpy allclose) | ✅ Done (10 tests) |
+| A.6.2 | Counterfactual orchestration (edit→compile→verify→delta, tri-state infra) | ✅ Done (19 tests) |
+| A.6.2 | Fallback-kernel counterfactual (decoupled from chunk_kda compiler bug) | ✅ Done (10 tests) |
+| A.6.2 | On-device Triton kernel launcher (load→run→dump `.npy`) | ✅ Done (13 tests) |
+| A.6.2 | Remote 910B3 runner (sync/recompile/msprof/fetch, host config, CANN preamble) | ✅ Done (18 tests) |
+| A.6 | chunk_kda compile + dump-survives spike | ⛔ xfail — bishengir `ConvertLinalgRToBinary` crash (CANN 9.0.0-beta.2) |
+
+---
+
+## Completed: A.5 — Bound Combiner & Attribution (2026-06-09)
+
+| Step | Status |
+|------|--------|
+| `T_bound = max(T_grid_floor, T_core_floor) + T_serial_irreducible` | ✅ Done |
+| Five-way attribution (grid + gap1/2/3/4), Gap 3 from real handoff classification | ✅ Done |
+| Binding tier/component detection + text/JSON report | ✅ Done |
+| Two-limit (`T_bound_HIVM` vs `T_bound_DSL`) + reachability hierarchy (A.7) | ✅ Done — `two_limit.py` |
+| Real-kernel milestone (mixed-CV pipeline end-to-end) | ✅ Done |
+
+---
+
+## Historical: A.5 milestone scope (Wk 7)
 
 **A.5 scope**: Complete the M5 combiner module with full five-way attribution wired from real data:
 - Gap 3 (avoidable serialization) computation from handoff classification

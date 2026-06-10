@@ -19,6 +19,8 @@ from typing import Callable, Dict, List, Optional
 
 from ..combine.bound_combiner import BoundResult
 from ..extract.op_classifier import Component
+from .counterfactual import CounterfactualResult, run_counterfactual
+from .hivm_edits import HivmEdit
 from .msprof_parser import parse_kernel_time_us, parse_component_durations
 
 
@@ -333,6 +335,112 @@ def run_validation(
             # Local CSV already present
             result = validate_from_csv(case)
 
+        suite.results.append(result)
+
+    return suite
+
+
+# ── Counterfactual validation (A.6.2) ────────────────────────────────
+
+@dataclass
+class CounterfactualCase:
+    """A single counterfactual experiment definition.
+
+    Carries the kernel identity, the gap being tested, the predicted gap
+    value from the model, the HIVM edit to apply, baseline CSV for
+    timing, and optional reference function for correctness checking.
+    """
+    kernel_name: str
+    gap_name: str                        # e.g. "gap3_avoidable_serial"
+    predicted_gap_us: float              # from A.5 Attribution
+    hivm_edit: HivmEdit                  # edit to apply
+    hivm_path: Path | None = None        # original HIVM the edit applies to
+    baseline_csv: Path | None = None     # baseline msprof CSV
+    profiler_op_name: str | None = None  # op name filter
+    reference_fn: Callable | None = None # reference output generator
+    reference_args: tuple = ()           # args for reference_fn
+    rtol: float = 1e-3
+    atol: float = 1e-5
+
+
+@dataclass
+class CounterfactualSuite:
+    """Results for a full counterfactual validation suite."""
+    results: List[CounterfactualResult] = field(default_factory=list)
+
+    @property
+    def valid_count(self) -> int:
+        return sum(1 for r in self.results if r.is_valid)
+
+    @property
+    def valid_rate(self) -> float:
+        if not self.results:
+            return 0.0
+        return self.valid_count / len(self.results)
+
+    @property
+    def median_quantification_error(self) -> float:
+        """Median quantification error across valid results."""
+        valid = [r.quantification_error for r in self.results if r.output_verified]
+        if not valid:
+            return float("inf")
+        sorted_err = sorted(valid)
+        n = len(sorted_err)
+        if n % 2 == 0:
+            return (sorted_err[n // 2 - 1] + sorted_err[n // 2]) / 2
+        return sorted_err[n // 2]
+
+    def summary(self) -> str:
+        lines = [
+            f"=== Counterfactual Suite Results ===",
+            f"Total cases: {len(self.results)}",
+            f"Valid: {self.valid_count} ({self.valid_rate:.1%})",
+            f"Median quantification error: {self.median_quantification_error:.3f}",
+        ]
+        for r in self.results:
+            status = "VALID" if r.is_valid else "INVALID"
+            lines.append(
+                f"  {r.kernel_name}/{r.gap_name}: {status} "
+                f"(predicted={r.predicted_gap_us:.2f}, "
+                f"measured={r.measured_delta_us:.2f}, "
+                f"error={r.quantification_error:.3f})"
+            )
+        return "\n".join(lines)
+
+
+def run_counterfactual_suite(
+    cases: List[CounterfactualCase],
+    remote_host: str | None = None,
+    remote_bench_script: str | None = None,
+) -> CounterfactualSuite:
+    """Run a suite of counterfactual experiments.
+
+    Args:
+        cases: List of CounterfactualCase to run.
+        remote_host: Remote 910B3 SSH host (None for local).
+        remote_bench_script: Path to scripts/remote_bench.py.
+
+    Returns:
+        CounterfactualSuite with per-case results.
+    """
+    suite = CounterfactualSuite()
+
+    for case in cases:
+        result = run_counterfactual(
+            kernel_name=case.kernel_name,
+            gap_name=case.gap_name,
+            predicted_gap_us=case.predicted_gap_us,
+            hivm_edit=case.hivm_edit,
+            hivm_path=case.hivm_path,
+            baseline_csv=case.baseline_csv,
+            profiler_op_name=case.profiler_op_name,
+            remote_host=remote_host,
+            remote_bench_script=remote_bench_script,
+            reference_fn=case.reference_fn,
+            reference_args=case.reference_args,
+            rtol=case.rtol,
+            atol=case.atol,
+        )
         suite.results.append(result)
 
     return suite

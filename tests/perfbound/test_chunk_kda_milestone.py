@@ -8,7 +8,7 @@
 #     fixture (known-good, parser-tested) to validate the full report pipeline.
 #   TestChunkKdaMilestone — compiles the real chunk_kda kernel through
 #     --triton-script, producing a live DES graph and report.  Currently
-#     xfailed due to a bishengir-compile-a5 crash (ConvertLinalgRToBinary).
+#     xfailed due to a bishengir-compile crash (ConvertLinalgRToBinary).
 #
 # Environment gating:
 #   - SKIP when tritonsim-hivm binary not built
@@ -365,14 +365,14 @@ class TestAnalyticEstimates:
 class TestChunkKdaCompile:
     """Compile the real chunk_kda kernel through --triton-script.
 
-    Currently xfailed: bishengir-compile-a5 crashes in ConvertLinalgRToBinary
+    Currently xfailed: bishengir-compile crashes in ConvertLinalgRToBinary
     (SmallVector assertion) on CANN 9.0.0-beta.2.  The test tracks this gap
     and will flip to pass when the compiler is fixed.
     """
 
     @pytest.mark.xfail(
         reason=(
-            "bishengir-compile-a5 fails on chunk_kda kernel: "
+            "bishengir-compile fails on chunk_kda kernel: "
             "(1) HIVM pipeline cannot legalize linalg.generic, "
             "(2) ConvertLinalgRToBinary crashes on SmallVector assertion. "
             "Both are CANN 9.0.0-beta.2 compiler bugs."
@@ -396,4 +396,130 @@ class TestChunkKdaCompile:
         low, high = HAND_FLOPS_TOTAL * 0.75, HAND_FLOPS_TOTAL * 1.25
         assert low <= extract_flops <= high, (
             f"FLOPs {extract_flops:.2e} outside [{low:.2e}, {high:.2e}]"
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Test Class 4: Blocker-1 Spike — dump-before-codegen
+# ══════════════════════════════════════════════════════════════════════════
+
+@requires_binary
+@requires_kernel
+@requires_compile_env
+class TestDumpBeforeCodegen:
+    """Spike: does the HIVM dump complete before the codegen crash?
+
+    Runs tritonsim-hivm --triton-script (which internally invokes the dump
+    launcher that intercepts bishengir-compile).  The chunk_kda compile is
+    expected to crash in ConvertLinalgRToBinary on CANN 9.0.0-beta.2.
+
+    The dump launcher runs bishengir-compile a *second* time with
+    --bishengir-print-ir-after=hivm-inject-sync to capture NPUIR.
+    These tests check whether that secondary dump produces .npuir.mlir
+    files before the primary crash propagates.
+
+    Tests call pytest.xfail() at runtime when no dump is found, so they
+    PASS if the dump survives the crash and XFAIL if it does not.
+
+    Deferred to WSL/hardware:
+    - Running the actual bishengir-compile command
+    - Capturing the full stderr with pass trace
+    - Determining if --bishengir-print-ir-after=hivm-inject-sync produces
+      output before the crash
+    """
+
+    def test_hivm_dump_survives_crash(self, tmp_path):
+        """Check if .npuir.mlir exists after primary compile fails.
+
+        Runs the full dump-launcher path.  If the compiler crashes but
+        the secondary dump captured NPUIR, the test passes.  If no dump
+        is found, the test xfails (spike not yet resolved).
+        """
+        dump_dir = tmp_path / "dump"
+        dump_dir.mkdir()
+
+        cmd = [
+            str(TRITONSIM_HIVM),
+            "--triton-script", str(KERNEL_SCRIPT),
+            "--python", _PYTHON,
+            "--hardware-config", str(HW_CONFIG),
+            "--des-graph-file", str(tmp_path / "kda_des.json"),
+            "--scheduler", "des",
+        ]
+
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=300,
+            cwd=str(dump_dir),
+        )
+
+        # Compile is expected to fail (bishengir-compile bug).
+        # If it succeeds, the blocker is resolved — test passes trivially.
+        if result.returncode == 0:
+            return  # Blocker resolved, dump not needed
+
+        # Search for .npuir.mlir files in dump_dir and subdirectories
+        npuir_files = list(dump_dir.rglob("*.npuir.mlir"))
+
+        if not npuir_files:
+            pytest.xfail(
+                "spike: no .npuir.mlir captured before crash — "
+                "investigating dump-before-codegen ordering"
+            )
+
+        # Dump was captured — verify it contains MLIR content
+        content = npuir_files[0].read_text(encoding="utf-8")
+        assert len(content) > 50, (
+            f"Dumped MLIR suspiciously short: {len(content)} chars"
+        )
+        assert "func" in content or "module" in content, (
+            "Dumped MLIR does not contain expected func/module markers"
+        )
+
+    def test_ttadapter_mlir_captured(self, tmp_path):
+        """Check if any ttadapter MLIR is saved before the codegen crash.
+
+        The dump launcher may capture IR at different stages.  This test
+        looks for any .mlir file (not just .npuir.mlir) that contains
+        function definitions, indicating the IR was captured.
+        """
+        dump_dir = tmp_path / "dump"
+        dump_dir.mkdir()
+
+        cmd = [
+            str(TRITONSIM_HIVM),
+            "--triton-script", str(KERNEL_SCRIPT),
+            "--python", _PYTHON,
+            "--hardware-config", str(HW_CONFIG),
+            "--des-graph-file", str(tmp_path / "kda_des.json"),
+            "--scheduler", "des",
+        ]
+
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=300,
+            cwd=str(dump_dir),
+        )
+
+        if result.returncode == 0:
+            return  # Blocker resolved
+
+        # Look for any MLIR files that might be ttadapter or intermediate IR
+        mlir_files = list(dump_dir.rglob("*.mlir"))
+
+        if not mlir_files:
+            pytest.xfail(
+                "spike: no MLIR files captured before crash — "
+                "investigating dump-before-codegen ordering"
+            )
+
+        # At least one MLIR file should contain func.func or module
+        found_content = False
+        for f in mlir_files:
+            content = f.read_text(encoding="utf-8")
+            if "func" in content or "module" in content:
+                found_content = True
+                break
+
+        assert found_content, (
+            f"Found {len(mlir_files)} MLIR file(s) but none contain "
+            "func/module — ttadapter capture may be incomplete"
         )
