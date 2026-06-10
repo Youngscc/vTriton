@@ -56,23 +56,30 @@ match is computed per-kernel (op-name-filtered).
 
 ---
 
-## Blockers (hardware/compiler-gated — not software)
+## Blockers — RESOLVED on real hardware (2026-06-10)
 
-| Item | Blocker | Status |
-|------|---------|--------|
-| chunk_kda compile → DES graph | bishengir-compile crashes in `ConvertLinalgRToBinary` (SmallVector assertion), CANN 9.0.0-beta.2 — a third-party compiler bug, not in our source | xfail; `TestChunkKdaCompile` |
-| Does HIVM dump survive the crash? | Needs a live run of `tritonsim-hivm --triton-script` on the device | spike staged: `TestDumpBeforeCodegen` (xfails until dump confirmed) |
-| Live 910B3 validation / counterfactual | Real device (sync → recompile → msprof → fetch) | plumbing complete + offline-tested; awaits hardware |
+| Item | Original blocker | Status |
+|------|------------------|--------|
+| chunk_kda compile → DES graph | bishengir-compile crashes in `ConvertLinalgRToBinary` (SmallVector assertion), CANN 9.0.0-**beta.2** | ✅ **RESOLVED** — fixed in CANN 9.0.0 release; chunk_kda compiles+runs on the 910B3 (`.omc/research/hw_runs/RESULTS.md`). `TestChunkKdaCompile` xfail reason updated (now only no-NPU-on-WSL) |
+| Does HIVM dump survive the crash? | Needs a live run on the device | ✅ **MOOT** — no crash to survive; full codegen succeeds. `TestDumpBeforeCodegen` docstring updated |
+| Live 910B3 validation | Real device (sync → msprof → fetch → parse → soundness) | ✅ **DONE** — real T_measured=104.3 ms, author_headroom=102.9 ms, soundness PASS. Guarded by `test_chunk_kda_hw_validation.py` |
+| Counterfactual delta on hardware | edit → recompile → verify → delta on device | 🟡 mechanism offline-proven (`test_counterfactual_fallback.py`) + remote wiring fixed; one live run still pending |
 
-Scoping detail: `.omc/plans/a6_2_blockers_scope.md`. The recommended de-risking —
-proving the counterfactual mechanism on a fallback kernel — is **done**
-(`test_counterfactual_fallback.py`), so A.6.2 is not blocked on the chunk_kda
-compiler bug.
+Real-data bug fixed in passing: the kernel profiles as Task Type **`MIX_AIC`**,
+which `parse_kernel_time_us` did not recognise (matched only `AI_CORE`), so it
+dropped every kernel row. Now both timing and component parsing share
+`_is_aicore_task()` (recognises `AI_CORE`/`AICORE`/`MIX_AIC`/`MIX_AIV`/
+`AI_VECTOR_CORE`/`AIV`). `remote_bench.py` wiring corrected to the real box
+(CANN `ascend-toolkit`, conda `triton_hxl`, single-brace shell groups,
+`command -v msprof` preflight, sync excludes for `.git`/`thirdparty`).
+
+Scoping detail: `.omc/plans/a6_2_blockers_scope.md`.
 
 ---
 
 ## Test totals
 
-- A.6.1: 31 · A.6.2: 93
-- Full `perfbound/` suite: **311 passed, 3 skipped, 2 xfailed** (316 collected)
-- The 2 xfails are both the bishengir compiler bug (compile + dump-survives spike).
+- A.6.1: 31 · A.6.2: 93 · HW validation: 4 (`test_chunk_kda_hw_validation.py`)
+- Full `perfbound/` suite: **317 passed, 3 skipped, 2 xfailed**
+- The 2 xfails are the local milestone compile/dump tests — now xfail only
+  because WSL has no NPU device (the bishengir compiler bug is resolved).

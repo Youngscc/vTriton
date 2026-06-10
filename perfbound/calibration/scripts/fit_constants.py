@@ -73,8 +73,15 @@ class MSProfRow:
 
 
 def read_msprof_csv(csv_path: Path) -> List[MSProfRow]:
-    """Read msprof op_summary CSV into structured rows."""
+    """Read msprof op_summary CSV into structured rows.
+
+    Real op_summary CSVs interleave aggregate/host rows whose numeric columns
+    are ``N/A``; these are skipped.  Rather than print one warning per skipped
+    row (real CSVs can have dozens), the count is summarised once at the end.
+    """
     rows = []
+    skipped = 0
+    first_skip_reason = ""
     with open(csv_path) as f:
         reader = csv.DictReader(line for line in f if not line.strip().startswith("#"))
         for line in reader:
@@ -107,7 +114,15 @@ def read_msprof_csv(csv_path: Path) -> List[MSProfRow]:
                 )
                 rows.append(row)
             except (ValueError, KeyError) as e:
-                print(f"Warning: Skipping malformed row in {csv_path}: {e}")
+                skipped += 1
+                if not first_skip_reason:
+                    first_skip_reason = str(e)
+    if skipped:
+        print(
+            f"Warning: skipped {skipped} non-numeric/aggregate row(s) in "
+            f"{csv_path} (e.g. {first_skip_reason})",
+            file=sys.stderr,
+        )
     return rows
 
 

@@ -1,0 +1,78 @@
+# A.6.2 Progress — Counterfactual Validation
+# Ralph session: 2026-06-09
+
+## Implementation Summary
+
+### Files Created
+- `perfbound/validate/hivm_edits.py` — HIVM edit primitives (raise_repeat, insert_pingpong, merge_transfers)
+- `perfbound/validate/correctness.py` — Output verification via numpy.allclose
+- `tests/perfbound/fixtures/sample_hivm.json` — HIVM test fixture (5 ops: 2×MTE2, 1×Cube, 1×MTE_UB, 1×MTE2)
+- `tests/perfbound/test_hivm_edits.py` — 15 tests for edit primitives
+- `tests/perfbound/test_correctness.py` — 10 tests for verify_output
+- `tests/perfbound/test_counterfactual.py` — 14 tests for run_counterfactual orchestration
+
+### Files Modified
+- `perfbound/validate/counterfactual.py` — Replaced NotImplementedError with full orchestration (6-step pipeline)
+- `perfbound/validate/harness.py` — Added CounterfactualCase, CounterfactualSuite, run_counterfactual_suite
+- `scripts/remote_bench.py` — Added recompile_remote(), --hivm-in CLI flag
+
+### Test Results
+- A.6.2 new tests: 39 passed
+- Full regression: 258 passed, 1 skipped, 1 xfailed
+- A.6.1 baseline was: 219 passed, 1 skipped, 1 xfailed
+- Delta: +39 tests, 0 regressions
+
+### Design Decisions
+1. HIVM edits use structured JSON manipulation (load → mutate → write temp), not regex — per project rule
+2. run_counterfactual uses dependency injection (_profile_fn, _compile_and_profile_fn, _edit_fn, _verify_fn) for testability without hardware
+3. Infra failures (compile crash, profiler error) surface as non-valid result with notes — never spurious small delta
+4. CounterfactualResult gained a `notes` field for infra-error descriptions
+5. Default n_warmup=1 in parse_kernel_time_us affects baseline CSV tests — must account for warmup discarding
+
+### Blocker Status
+- bishengir compilation of chunk_kda (Gap #1) remains unresolved
+- All A.6.2 code works with mocks; hardware validation blocked on this
+- Counterfactual mechanism is not coupled to one kernel
+
+### Learnings
+- sample CSV with 3 AI_CORE rows → warmup=1 discards first → median of [1050, 5000] = 3025.0
+- merge_transfers only merges truly consecutive ops (no intervening ops) — fixture load_B and load_B2 are NOT consecutive (matmul between them)
+
+# ─────────────────────────────────────────────────────────────────────
+# Hardware caveat-closure session — 2026-06-10
+# ─────────────────────────────────────────────────────────────────────
+
+## What was done
+- Wired the real remote 910B3 (ssh host `910B3`, CANN 9.0.0, conda triton_hxl,
+  8x NPU, aarch64) and ran the full measurement pipeline on real hardware.
+- Fixed scripts/remote_bench.py to the real machine: CANN ascend-toolkit
+  set_env, conda triton_hxl (both env-overridable), single-brace shell groups
+  (was literal `{{ }}` = invalid bash), `command -v msprof` preflight (msprof
+  has no --version), `bishengir-compile` on PATH, sync excludes (.git/thirdparty).
+- Captured a real msprof op_summary CSV for chunk_kda → fixture
+  tests/perfbound/fixtures/chunk_kda_op_summary_910b3.csv + evidence in
+  .omc/research/hw_runs/RESULTS.md.
+- New CI test tests/perfbound/test_chunk_kda_hw_validation.py (4 tests).
+- Updated test_chunk_kda_milestone.py xfail reasons (bug resolved).
+
+## Key results
+- chunk_kda COMPILES + RUNS on CANN 9.0.0 release. The bishengir
+  ConvertLinalgRToBinary crash was a 9.0.0-BETA.2 bug, fixed in release.
+- T_measured=104,326 us; T_bound(HBM)=1,386 us; PASS; tightness 75.3x;
+  author_headroom=102,940 us (first real, non-synthetic value).
+- component_match=False: model predicts memory-bound (mte_gm), hardware is
+  aicore-dominant — naive HBM floor mispredicts binding for small-tile dots.
+
+## Learnings
+- Real chunk_kda profiles as Task Type MIX_AIC (mixed cube), NOT AI_CORE.
+  parse_kernel_time_us dropped these (matched only AI_CORE/AICORE) while
+  parse_component_durations kept them — a silent divergence only real data
+  exposed. Fixed via shared _is_aicore_task() (AI_CORE/AICORE/MIX_AIC/MIX_AIV/
+  AI_VECTOR_CORE/AIV).
+- Remote is aarch64; the x86-64 tritonsim-hivm ELF cannot run there, so an
+  offline chunk_kda des.json still needs an NPU x86 host (or a native build).
+- read_msprof_csv now summarises skipped N/A rows once (real CSVs have ~84).
+- vtriton-verify env: run pytest with TORCH_DEVICE_BACKEND_AUTOLOAD=0
+  (torch_npu auto-load crashes without a device); coarse WSL mtime can serve a
+  stale .pyc to inspect.getsource — clear __pycache__ if a source-inspect test
+  flakes.

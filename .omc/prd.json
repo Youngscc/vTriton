@@ -1,104 +1,75 @@
 {
-  "title": "A.4 \u2014 Module 4: Two Analytical Models (units discipline + acceptance)",
+  "title": "Close hardware-gated caveats — real 910B3 runs (remote_bench wiring, real T_measured, bishengir chunk_kda reproduction)",
+  "context": "User set up the remote 910B3 (ssh host '910B3' = 173.147.1.2, root, via local SOCKS proxy). CANN 9.0.0 at /usr/local/Ascend/ascend-toolkit (bishengir-compile + msprof at /usr/local/Ascend/cann-9.0.0/bin). Triton deps in conda env 'triton_hxl'. 8x 910B3 NPUs (chip0 in Alarm; chips1-7 OK). No remote repo yet. remote_bench.py hardcodes CANN '/usr/local/Ascend/cann/set_env.sh' + conda 'tlx' + has a literal '{{ }}' brace bug that breaks the shell '||' fallbacks. Goal: close the three caveats flagged on A.5/A.6/A.7 that were 'hardware-gated, never run on real hardware'.",
   "stories": [
     {
-      "id": "US-A4-001",
-      "title": "Component model consumes flops for compute work",
-      "description": "Change #1: component_model.py Cube/Vector/Scalar branch uses op.flops when >0 (falling back to op.elements) for work aggregation.",
+      "id": "US-HW-001",
+      "title": "Fix remote_bench.py to match the real 910B3 environment",
+      "description": "Make the remote preamble match the actual machine: CANN set_env at /usr/local/Ascend/ascend-toolkit/set_env.sh, conda env 'triton_hxl', bishengir-compile on PATH (cann-9.0.0/bin). Fix the literal '{{ }}' double-brace shell bug to single-brace groups. Make CANN setenv path + conda env name overridable via env vars so the script is not brittle.",
       "acceptanceCriteria": [
-        "component_model.py Cube/Vector/Scalar branch uses work_raw = op.flops if op.flops > 0 else op.elements, then work = float(work_raw) * float(op.loop_multiplier)",
-        "Vector rate path has a one-line comment stating the work-unit invariant",
-        "Existing test_component_model.py tests still pass with unchanged golden numbers (synthetic calibration fixtures)",
-        "Spine check: OpRecord with flops=2*M*N*K and elements=M*N yields T_cube from flops magnitude"
+        "_REMOTE_PREAMBLE (or its replacement) sources /usr/local/Ascend/ascend-toolkit/set_env.sh by default and activates conda env 'triton_hxl' by default",
+        "CANN setenv path is overridable via VTRITON_REMOTE_CANN_SETENV and conda env via VTRITON_REMOTE_CONDA_ENV (defaults match the real machine)",
+        "All shell-group fallbacks use single-brace '{ cmd; }' form (no literal '{{ }}'), so the generated SSH command is valid bash",
+        "recompile_remote default bishengir path resolves to 'bishengir-compile' on PATH (after CANN sourcing), not the non-existent thirdparty/AscendNPU-IR build path",
+        "A unit test asserts the generated preamble string contains 'ascend-toolkit/set_env.sh' and 'conda activate triton_hxl' and contains no '{{'",
+        "python3 -m pytest tests/perfbound/ -q stays green (no regressions vs prior baseline)"
       ],
       "priority": 1,
       "passes": true
     },
     {
-      "id": "US-A4-002",
-      "title": "Grid model accepts explicit total_work parameter",
-      "description": "Change #2: compute_grid_floor gains total_work param. Numerator from total_work, not sum(grid.work.values()).",
+      "id": "US-HW-002",
+      "title": "Establish remote config + connectivity, sync repo, smoke the env preamble on hardware",
+      "description": "Write ~/.vtriton_remote (host=910B3, path=~/vTriton). Sync the repo to the remote. Run the exact env preamble over SSH and confirm CANN sources, conda triton_hxl activates, and bishengir-compile + msprof + npu-smi are all reachable inside that environment.",
       "acceptanceCriteria": [
-        "compute_grid_floor signature: compute_grid_floor(grid, core, i_binding, total_work, is_cube_kernel=True) \u2014 total_work required positional",
-        "T_grid_floor = total_work * redundancy / (n_cores * occupancy * load_balance * i_binding) \u2014 total_work NOT derived from grid.work",
-        "occupancy, load_balance, redundancy, busiest_core_id still sourced from GridInfo"
+        "~/.vtriton_remote exists with [remote] host=910B3 and path pointing at the remote checkout",
+        "resolve_remote_config() returns host '910B3' with no CLI/env override (reads the config file)",
+        "Repo synced to remote ~/vTriton (rsync) — scripts/, perfbound/, test/, configs/ present remotely",
+        "Running the generated preamble over SSH succeeds: 'echo OK' returns OK with CANN+conda active",
+        "Inside the preamble env on remote: bishengir-compile --version (or --help) runs, msprof --version runs, npu-smi info lists 910B3 — captured as evidence in progress.txt"
       ],
       "priority": 2,
       "passes": true
     },
     {
-      "id": "US-A4-003",
-      "title": "Delete hand-rolled grid floor bypass in bound_from_extract",
-      "description": "bound_from_extract calls compute_grid_floor with total_work = \u03a3 bytes*loop_multiplier instead of hand-constructing GridBound.",
+      "id": "US-HW-003",
+      "title": "Produce a REAL T_measured on the 910B3 and flow it through the three-level report",
+      "description": "Run a kernel that actually compiles+runs on the 910B3 under msprof, fetch op_summary CSV, parse T_measured via msprof_parser, and render the three-level reachability hierarchy (HIVM/DSL/measured) with a real author_headroom number. Closes the 'author_headroom never populated with real data' caveat.",
       "acceptanceCriteria": [
-        "bound_from_extract no longer constructs GridBound by hand \u2014 it calls compute_grid_floor",
-        "A minimal GridInfo is constructed in bound_from_extract with occupancy/load_balance from args",
-        "test_matmul_bound_matches_golden still passes (T_bound ~4.522 us)"
+        "A kernel is profiled on real hardware via remote_bench (msprof op_summary_*.csv fetched back to local)",
+        "parse_kernel_time_us() parses the real CSV to a finite positive T_measured (n_invocations >= 1 after warmup discard)",
+        "The kernel's bound (T_bound_HIVM/T_bound_DSL) is computed and the three-level report renders with real T_measured and a real author_headroom_us (or a labelled BOUND_VIOLATION if T_bound > T_measured)",
+        "The validation soundness check classifies the run as PASS or BOUND_VIOLATION (not EXECUTION_ERROR), with the real CSV path recorded as msprof_source",
+        "The real CSV + report output are saved under .omc/research/ as evidence, and progress.txt records the measured numbers"
       ],
       "priority": 3,
       "passes": true
     },
     {
-      "id": "US-A4-004",
-      "title": "Serialization T_serial_irreducible = \u03a3 over distinct mandatory edges",
-      "description": "Change #5: dedup by (producer_component, consumer_component) edge, then sum costs over distinct edges.",
+      "id": "US-HW-004",
+      "title": "Reproduce/resolve the bishengir chunk_kda compile on real CANN 9.0.0 and settle the xfail",
+      "description": "Run bishengir-compile on the chunk_kda kernel path on the real 910B3 (CANN 9.0.0). Record the definitive outcome: does it still crash in ConvertLinalgRToBinary (SmallVector assertion)? Does the HIVM/DES dump survive the crash so the modelling path still works even if codegen fails? Update tests/perfbound/test_chunk_kda_milestone.py xfail to reflect the evidence (keep xfail with concrete reason+log, or flip to pass if the bug is gone on this CANN).",
       "acceptanceCriteria": [
-        "classify_handoffs deduplicates mandatory handoffs by (producer, consumer) edge before summing",
-        "Two distinct mandatory edges yield T_serial = 2 \u00d7 (cycles/clock)",
-        "Same edge repeated across iterations counted once",
-        "mandatory_handoff_cycles == 0 \u2192 0.0 conservative path preserved",
-        "Existing test_serial_irreducible_from_calibration still passes (1 edge \u2192 1\u00d7)"
+        "bishengir-compile is run against the chunk_kda kernel on the remote 910B3 and the full stdout/stderr is captured to .omc/research/ as evidence",
+        "The outcome is definitively classified: (a) still crashes in ConvertLinalgRToBinary, (b) compiles successfully, or (c) different failure — with the exact error recorded",
+        "Whether the HIVM/DES graph dump is produced before the crash is determined (the TestDumpBeforeCodegen spike question is answered with evidence)",
+        "test_chunk_kda_milestone.py is updated so its xfail/skip condition matches reality on this CANN (reason string cites the captured evidence; flips to a real pass only if the kernel actually compiles)",
+        "python3 -m pytest tests/perfbound/test_chunk_kda_milestone.py -q reflects the real state (xfail with documented reason, or pass)"
       ],
       "priority": 4,
       "passes": true
     },
     {
-      "id": "US-A4-005",
-      "title": "Relabel test fixtures so flops != elements",
-      "description": "matmul/matmul_vector fixtures: flops=2\u00b7M\u00b7N\u00b7K, elements=M\u00b7N. Golden T_cube unchanged.",
+      "id": "US-HW-005",
+      "title": "Update PROGRESS.md + caveat docs to reflect the real hardware results",
+      "description": "Replace the 'hardware-gated / never run on real hardware' caveats with the evidence-backed outcomes from US-HW-003 and US-HW-004. Update .omc/plans/a6_progress.md blocker table and PROGRESS.md current-state section.",
       "acceptanceCriteria": [
-        "matmul_extract fixture: matmul OpRecord has flops=2*128*64*32, elements=128*64",
-        "matmul_vector_extract fixture: same relabel for Cube op",
-        "Each fixture explicitly has flops != elements (2K\u00d7 ratio)",
-        "Golden T_cube values unchanged (~0.060 us synthetic)"
+        "PROGRESS.md current-state section records: remote 910B3 wired, a real T_measured produced (with the number), and the bishengir chunk_kda outcome (resolved/still-blocked with evidence link)",
+        ".omc/plans/a6_progress.md blocker table updated: each previously hardware-gated row now points to the captured evidence and its resolved status",
+        "Any caveat that is genuinely closed is stated plainly; any that remains (e.g. a third-party compiler bug we cannot patch) is stated with the evidence and why it is out of our control",
+        "No overclaiming: docs distinguish 'ran on hardware and measured' from 'still blocked by external compiler bug'"
       ],
       "priority": 5,
-      "passes": true
-    },
-    {
-      "id": "US-A4-006",
-      "title": "Attention-shaped golden kernel with two distinct mandatory edges",
-      "description": "FlashAttention-style Cube\u2192Vector\u2192Cube with TWO distinct mandatory handoffs. All intermediates to 3 sig figs.",
-      "acceptanceCriteria": [
-        "attention_extract fixture has Cube (QK^T) \u2192 Vector (softmax) \u2192 Cube (\u00d7V) ops",
-        "Two distinct mandatory handoffs: Cube\u2192Vector and Vector\u2192Cube",
-        "T_serial_irreducible = 2 \u00d7 (cycles/clock) with the \u03a3 fix",
-        "All intermediates (I_c, T_core_floor, T_serial_irreducible) asserted with pytest.approx(rel=1e-3)"
-      ],
-      "priority": 6,
-      "passes": true
-    },
-    {
-      "id": "US-A4-007",
-      "title": "Dedup and grid-floor dedicated tests",
-      "description": "test_serialization.py (dedup behavior) and test_grid_model.py (grid floor through real function).",
-      "acceptanceCriteria": [
-        "test_serialization.py exists with same-edge-repeated \u2192 counted-once test",
-        "test_grid_model.py exists with compute_grid_floor(GridInfo + total_work) \u2192 T_grid_floor matches hand value",
-        "Both files in tests/perfbound/ and pass"
-      ],
-      "priority": 7,
-      "passes": true
-    },
-    {
-      "id": "US-A4-008",
-      "title": "Full test suite green + spine check",
-      "description": "All tests/perfbound/ pass. Spine check: flops consumed on real CalibrationDB.",
-      "acceptanceCriteria": [
-        "python3 -m pytest tests/perfbound/ -q \u2192 all pass, 0 failures",
-        "Spine check: OpRecord with flops=2*M*N*K, elements=M*N \u2192 T_cube > 3.0 us on real calib"
-      ],
-      "priority": 8,
       "passes": true
     }
   ]

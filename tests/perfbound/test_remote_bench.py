@@ -16,7 +16,7 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, str(Path(__file__).parents[2]))
 
 from scripts.remote_bench import (
-    _REMOTE_PREAMBLE,
+    _remote_preamble,
     _remote_env_preamble,
     resolve_remote_config,
     run_msprof_remote,
@@ -223,20 +223,20 @@ class TestPythonKernelLauncher:
 
 
 class TestContractConformance:
-    """Verify environment preamble matches the a0 plan §7 contract."""
+    """Verify environment preamble matches the real 910B3 contract."""
 
     def test_contract_conformance_env_preamble(self):
-        """PYTHONPATH, conda, CANN source all present in preamble."""
+        """PYTHONPATH, conda triton_hxl, CANN ascend-toolkit all present."""
         preamble = _remote_env_preamble("~/vTriton")
 
-        # CANN environment
-        assert "source /usr/local/Ascend/cann/set_env.sh" in preamble, (
-            "Missing CANN set_env.sh in preamble"
+        # CANN environment — real machine uses the ascend-toolkit set_env.sh
+        assert "source /usr/local/Ascend/ascend-toolkit/set_env.sh" in preamble, (
+            "Missing CANN ascend-toolkit set_env.sh in preamble"
         )
 
-        # Conda activation
-        assert "conda activate tlx" in preamble, (
-            "Missing conda activate tlx in preamble"
+        # Conda activation — real machine env is triton_hxl
+        assert "conda activate triton_hxl" in preamble, (
+            "Missing conda activate triton_hxl in preamble"
         )
 
         # PYTHONPATH for triton-ascend
@@ -247,17 +247,42 @@ class TestContractConformance:
             "PYTHONPATH should include triton-ascend/python"
         )
 
+    def test_preamble_no_double_brace(self):
+        """Generated shell must use single-brace '{ ...; }' groups, not '{{'.
+
+        Regression guard: the old plain-string preamble emitted literal
+        '{{ ... }}' which is invalid bash and broke the '||' fallbacks on the
+        first real hardware run.
+        """
+        preamble = _remote_env_preamble("~/vTriton")
+        assert "{{" not in preamble, f"literal '{{{{' leaked into shell: {preamble}"
+        assert "}}" not in preamble
+        # The fail-loud group should be a valid single-brace group.
+        assert "|| { echo 'CANN env not found'" in preamble
+
+    def test_preamble_overridable_via_env(self):
+        """CANN path + conda env are overridable via env vars."""
+        with patch.dict(os.environ, {
+            "VTRITON_REMOTE_CANN_SETENV": "/custom/cann/set_env.sh",
+            "VTRITON_REMOTE_CONDA_ENV": "myenv",
+        }):
+            preamble = _remote_env_preamble("~/vTriton")
+        assert "source /custom/cann/set_env.sh" in preamble
+        assert "conda activate myenv" in preamble
+
     def test_preamble_fail_loud_on_cann_error(self):
         """Preamble exits with error if CANN env source fails."""
-        assert "exit 1" in _REMOTE_PREAMBLE, (
+        preamble = _remote_preamble()
+        assert "exit 1" in preamble, (
             "Preamble should fail loud on CANN activation errors"
         )
-        assert "CANN env not found" in _REMOTE_PREAMBLE
+        assert "CANN env not found" in preamble
 
     def test_preamble_fail_loud_on_conda_error(self):
         """Preamble exits with error if conda activation fails."""
-        assert "conda not found" in _REMOTE_PREAMBLE
-        assert "conda activate tlx failed" in _REMOTE_PREAMBLE
+        preamble = _remote_preamble()
+        assert "conda not found" in preamble
+        assert "conda activate triton_hxl failed" in preamble
 
     def test_preamble_cd_to_remote_path(self):
         """Preamble starts with cd to remote_path."""
@@ -294,8 +319,8 @@ class TestPreflightChecks:
         assert len(msprof_cmds) > 0
 
         script = msprof_cmds[0][2]
-        assert "msprof --version" in script, (
-            f"Missing msprof --version preflight check in: {script[:300]}"
+        assert "command -v msprof" in script, (
+            f"Missing 'command -v msprof' preflight check in: {script[:300]}"
         )
 
     def test_preflight_msprof_version_in_python_path(self):
@@ -320,8 +345,8 @@ class TestPreflightChecks:
         assert len(msprof_cmds) > 0
 
         script = msprof_cmds[0][2]
-        assert "msprof --version" in script, (
-            f"Missing msprof --version preflight check in: {script[:300]}"
+        assert "command -v msprof" in script, (
+            f"Missing 'command -v msprof' preflight check in: {script[:300]}"
         )
 
 

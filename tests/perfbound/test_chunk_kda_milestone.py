@@ -365,18 +365,24 @@ class TestAnalyticEstimates:
 class TestChunkKdaCompile:
     """Compile the real chunk_kda kernel through --triton-script.
 
-    Currently xfailed: bishengir-compile crashes in ConvertLinalgRToBinary
-    (SmallVector assertion) on CANN 9.0.0-beta.2.  The test tracks this gap
-    and will flip to pass when the compiler is fixed.
+    UPDATE 2026-06-10: the bishengir-compile ConvertLinalgRToBinary crash was a
+    CANN 9.0.0-beta.2 bug and is RESOLVED in the CANN 9.0.0 release — chunk_kda
+    now compiles and runs on a live 910B3 (evidence:
+    .omc/research/hw_runs/, captured via scripts/remote_bench.py).  This local
+    test still xfails ONLY because WSL has no NPU device to JIT-compile the
+    kernel against; it is expected to PASS on an NPU host with a native
+    tritonsim-hivm.  The marker is non-strict so an NPU-host run XPASSes
+    rather than erroring.
     """
 
     @pytest.mark.xfail(
         reason=(
-            "bishengir-compile fails on chunk_kda kernel: "
-            "(1) HIVM pipeline cannot legalize linalg.generic, "
-            "(2) ConvertLinalgRToBinary crashes on SmallVector assertion. "
-            "Both are CANN 9.0.0-beta.2 compiler bugs."
+            "chunk_kda compiles+runs on CANN 9.0.0 release (the 9.0.0-beta.2 "
+            "ConvertLinalgRToBinary crash is fixed; evidence in "
+            ".omc/research/hw_runs/).  This local path still fails because WSL "
+            "has no NPU device for the JIT compile — not a compiler bug."
         ),
+        strict=False,
     )
     def test_compile_and_emit_des(self, kda_des_json):
         """chunk_kda → compile → des.json with Cube+Vector+MTE ops."""
@@ -409,23 +415,13 @@ class TestChunkKdaCompile:
 class TestDumpBeforeCodegen:
     """Spike: does the HIVM dump complete before the codegen crash?
 
-    Runs tritonsim-hivm --triton-script (which internally invokes the dump
-    launcher that intercepts bishengir-compile).  The chunk_kda compile is
-    expected to crash in ConvertLinalgRToBinary on CANN 9.0.0-beta.2.
-
-    The dump launcher runs bishengir-compile a *second* time with
-    --bishengir-print-ir-after=hivm-inject-sync to capture NPUIR.
-    These tests check whether that secondary dump produces .npuir.mlir
-    files before the primary crash propagates.
-
-    Tests call pytest.xfail() at runtime when no dump is found, so they
-    PASS if the dump survives the crash and XFAIL if it does not.
-
-    Deferred to WSL/hardware:
-    - Running the actual bishengir-compile command
-    - Capturing the full stderr with pass trace
-    - Determining if --bishengir-print-ir-after=hivm-inject-sync produces
-      output before the crash
+    UPDATE 2026-06-10: this spike is effectively MOOT.  The codegen crash it
+    was probing (ConvertLinalgRToBinary on CANN 9.0.0-beta.2) is fixed in the
+    CANN 9.0.0 release — chunk_kda compiles cleanly and runs on a live 910B3
+    (evidence: .omc/research/hw_runs/).  With no crash, the dump trivially
+    "survives": full codegen completes.  The tests below still xfail on WSL
+    only for lack of an NPU device, and short-circuit to PASS (returncode 0)
+    when run where the compile actually succeeds.
     """
 
     def test_hivm_dump_survives_crash(self, tmp_path):

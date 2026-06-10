@@ -11,8 +11,9 @@ Usage:
     python scripts/remote_bench.py --kernel <name> --output <csv_path>  # uses env vars
 
 Responsibilities:
-- SSH sync local repo → remote 910B3 under tlx env
-- Source CANN env (/usr/local/Ascend/cann/set_env.sh)
+- SSH sync local repo → remote 910B3 under the triton_hxl conda env
+- Source CANN env (/usr/local/Ascend/ascend-toolkit/set_env.sh by default;
+  override via VTRITON_REMOTE_CANN_SETENV / VTRITON_REMOTE_CONDA_ENV)
 - Export PYTHONPATH for triton-ascend
 - Run msprof --application=<exe> --output=<msprof_dir> on remote
   (or msprof --application="python kernel_launcher.py ..." for Triton kernels)
@@ -44,20 +45,53 @@ from pathlib import Path
 
 
 # ── Remote environment preamble (shared across all ssh scripts) ────────
-# Sources CANN, conda, and exports PYTHONPATH for triton-ascend.
-# Every ssh script fragment should start with this preamble.
-_REMOTE_PREAMBLE = (
-    "source /usr/local/Ascend/cann/set_env.sh || {{ echo 'CANN env not found' >&2; exit 1; }}"
-    " && source $(conda info --base)/etc/profile.d/conda.sh || {{ echo 'conda not found' >&2; exit 1; }}"
-    " && conda activate tlx || {{ echo 'conda activate tlx failed' >&2; exit 1; }}"
-)
+# Sources CANN, activates the conda env, and exports PYTHONPATH for
+# triton-ascend. Every ssh script fragment starts with this preamble.
+#
+# Defaults match the real 910B3 box: CANN 9.0.0 under ascend-toolkit and the
+# 'triton_hxl' conda env. Both are overridable via env vars so the runner is
+# not brittle across machines.
+_DEFAULT_CANN_SETENV = "/usr/local/Ascend/ascend-toolkit/set_env.sh"
+_DEFAULT_CONDA_ENV = "triton_hxl"
+
+
+def _remote_cann_setenv() -> str:
+    """CANN set_env.sh path on the remote (overridable)."""
+    return os.environ.get("VTRITON_REMOTE_CANN_SETENV", _DEFAULT_CANN_SETENV)
+
+
+def _remote_conda_env() -> str:
+    """Conda env to activate on the remote (overridable)."""
+    return os.environ.get("VTRITON_REMOTE_CONDA_ENV", _DEFAULT_CONDA_ENV)
+
+
+def _remote_preamble() -> str:
+    """Source CANN + conda + activate the env (single-brace shell groups).
+
+    Note: inside this f-string, ``{{`` / ``}}`` emit literal ``{`` / ``}`` so
+    the generated shell uses valid ``{ cmd; }`` group syntax for the ``||``
+    fallbacks.
+    """
+    cann_setenv = _remote_cann_setenv()
+    conda_env = _remote_conda_env()
+    return (
+        f"source {cann_setenv} || {{ echo 'CANN env not found' >&2; exit 1; }}"
+        f" && source $(conda info --base)/etc/profile.d/conda.sh || {{ echo 'conda not found' >&2; exit 1; }}"
+        f" && conda activate {conda_env} || {{ echo 'conda activate {conda_env} failed' >&2; exit 1; }}"
+    )
 
 
 def _remote_env_preamble(remote_path: str) -> str:
-    """Build the full remote preamble with cd + CANN + conda + PYTHONPATH."""
+    """Build the full remote preamble with cd + CANN + conda + PYTHONPATH.
+
+    ``remote_path`` is interpolated unquoted into the generated shell so a
+    leading ``~`` still tilde-expands on the remote (the default is
+    ``~/vTriton``); it must therefore be a shell-safe path with no spaces or
+    metacharacters.  Configured machine paths satisfy this.
+    """
     return (
         f"cd {remote_path}"
-        f" && {_REMOTE_PREAMBLE}"
+        f" && {_remote_preamble()}"
         f" && export PYTHONPATH={remote_path}/thirdparty/triton-ascend/python:$PYTHONPATH"
     )
 
@@ -101,23 +135,34 @@ def resolve_remote_config(
     return host, path
 
 
+# Heavy/derived paths never needed on the remote (triton is installed in the
+# conda env, so the in-repo thirdparty checkout is redundant).  Without these
+# excludes the sync pulls tens of GB (.git ~8G, thirdparty ~16G).
+_SYNC_EXCLUDES = (
+    ".git", "build", "thirdparty", ".claude", ".omc",
+    "__pycache__", "*.pyc",
+)
+
+
 def sync_to_remote(
     local_path: Path,
     remote_host: str,
     remote_path: str,
 ) -> None:
-    """Sync local directory to remote via rsync.
+    """Sync local directory to remote via rsync (excludes heavy/derived paths).
 
     Args:
         local_path: Local directory to sync.
         remote_host: SSH host (user@hostname).
         remote_path: Remote destination path.
     """
-    cmd = [
-        "rsync", "-avz", "--delete",
+    cmd = ["rsync", "-az", "--delete"]
+    for pat in _SYNC_EXCLUDES:
+        cmd.extend(["--exclude", pat])
+    cmd.extend([
         f"{local_path}/",
         f"{remote_host}:{remote_path}/",
-    ]
+    ])
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
@@ -137,7 +182,7 @@ def run_msprof_remote(
     """
     script = (
         f"{_remote_env_preamble(remote_path)}"
-        f" && msprof --version >/dev/null 2>&1 || {{ echo 'msprof not found' >&2; exit 1; }}"
+        f" && command -v msprof >/dev/null 2>&1 || {{ echo 'msprof not found' >&2; exit 1; }}"
         f" && msprof --application={kernel_exe} --output={msprof_dir}"
     )
     cmd = ["ssh", remote_host, script]
@@ -167,7 +212,7 @@ def run_python_kernel_remote(
     launcher = f"{remote_path}/scripts/kernel_launcher.py"
     script = (
         f"{_remote_env_preamble(remote_path)}"
-        f" && msprof --version >/dev/null 2>&1 || {{ echo 'msprof not found' >&2; exit 1; }}"
+        f" && command -v msprof >/dev/null 2>&1 || {{ echo 'msprof not found' >&2; exit 1; }}"
         f" && mkdir -p {output_dir}"
         f" && msprof --application=\"python {launcher}"
         f" --kernel {kernel_script}"
@@ -282,7 +327,8 @@ def recompile_remote(
     remote_bin = f"{remote_path}/build/bin/{kernel_name}"
 
     if bishengir_path is None:
-        bishengir_path = f"{remote_path}/thirdparty/AscendNPU-IR/build/bin/bishengir-compile"
+        # bishengir-compile is on PATH once CANN is sourced (cann-9.0.0/bin).
+        bishengir_path = "bishengir-compile"
 
     # Upload edited HIVM
     subprocess.run(

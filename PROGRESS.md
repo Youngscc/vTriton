@@ -17,9 +17,9 @@
 | **A.3** | M3 HIVM Extractor — C++ JSON round-trip verified | Wk 3–5 | ✅ **Complete** — DES schema fix, MTE byte aggregation, handoff tracing (108/108 tests) |
 | **A.4** | M4 Two Analytical Models — units discipline + compute_bounds driver | Wk 5–7 | ✅ **Complete** — flops consumption, distinct-edge serialization, 144/144 tests |
 | **A.5** | M5 Combiner — Gap 1/2/4 wired, Gap 3 from real handoffs | Wk 7 | ✅ **Complete** — combiner, 5-way attribution, two-limit, real-kernel milestone (committed `dffda87`) |
-| **A.6** | M6 Validation Harness — measurement + counterfactual | Wk 6–9 | ✅ **Software complete** — A.6.1 measurement (`174d0ab`) + A.6.2 counterfactual/remote runner; live runs hardware-gated |
-| **A.7** | Two-limit computation (`T_bound_HIVM` vs `T_bound_DSL`) | Wk 8 | ✅ **Complete** — delivered within A.5 (`two_limit.py`, reachability hierarchy) |
-| **A.8** | End-to-end pipeline verified on ≥1 real kernel | Wk 9 | 🟡 Partial — mixed-CV kernel pipeline green; chunk_kda blocked by bishengir compiler bug |
+| **A.6** | M6 Validation Harness — measurement + counterfactual | Wk 6–9 | ✅ **Complete** — A.6.1 measurement (`174d0ab`) + A.6.2 counterfactual/remote runner; **live 910B3 run done** (real T_measured, evidence `.omc/research/hw_runs/`) |
+| **A.7** | Two-limit computation (`T_bound_HIVM` vs `T_bound_DSL`) | Wk 8 | ✅ **Complete** — delivered within A.5; **author_headroom now populated from real msprof data** |
+| **A.8** | End-to-end pipeline verified on ≥1 real kernel | Wk 9 | 🟡 Mostly done — mixed-CV pipeline green; chunk_kda **compiles+runs on CANN 9.0.0** and is measured on hardware (bishengir beta.2 crash resolved); remaining gap is offline des.json extraction for chunk_kda (needs NPU host) |
 | **Part B** | Experiments, paper writing, iterate calibration | Wk 9–12 | ⛔ Not started |
 
 ---
@@ -29,8 +29,20 @@
 > A.5 → A.6.2 landed since the snapshot below. The "What's done" list covers
 > A.0–A.4; see the **A.5** and **A.6** completion sections lower down for the
 > combiner, attribution, two-limit, and validation harness. Full `perfbound/`
-> suite: **311 passed, 3 skipped, 2 xfailed** (the 2 xfails are the bishengir
-> compiler bug).
+> suite: **317 passed, 3 skipped, 2 xfailed**.
+>
+> **Hardware milestone (2026-06-10):** the remote 910B3 is wired
+> (`scripts/remote_bench.py`, ssh host `910B3`, CANN 9.0.0, conda `triton_hxl`).
+> chunk_kda **compiles and runs** on the device (the bishengir
+> `ConvertLinalgRToBinary` crash was a CANN 9.0.0-**beta.2** bug, fixed in the
+> 9.0.0 release). It was profiled under msprof: **T_measured ≈ 104.3 ms**,
+> T_bound (HBM floor) ≈ 1.39 ms → soundness **PASS** (75× tightness),
+> **author_headroom ≈ 102.9 ms** — the first real, non-synthetic three-level
+> measurement. Real-data parser bug fixed (MIX_AIC task type). Evidence +
+> reproduce steps: `.omc/research/hw_runs/RESULTS.md`; CI guard:
+> `tests/perfbound/test_chunk_kda_hw_validation.py`. The 2 remaining xfails are
+> the local milestone compile tests, which now xfail only because WSL has no
+> NPU device (not the compiler bug).
 
 ### What's done
 
@@ -53,8 +65,10 @@
 
 | Item | Blocker | Priority |
 |------|---------|----------|
-| chunk_kda compile → DES graph | bishengir `ConvertLinalgRToBinary` crash (CANN 9.0.0-beta.2) — third-party compiler bug | P1 |
-| Live 910B3 validation / counterfactual runs | Real device; plumbing complete + offline-tested, awaits hardware | P2 |
+| ~~chunk_kda compile crash~~ | ✅ **RESOLVED** — was a CANN 9.0.0-**beta.2** bug; chunk_kda compiles+runs on CANN 9.0.0 release (`.omc/research/hw_runs/`) | — |
+| ~~Live 910B3 validation runs~~ | ✅ **DONE** — real T_measured + author_headroom from msprof; soundness PASS (`test_chunk_kda_hw_validation.py`) | — |
+| Offline des.json for chunk_kda | Needs `tritonsim-hivm --triton-script` on an NPU host (WSL has no NPU; remote 910B3 is aarch64, the x86-64 binary can't run there) | P2 |
+| Counterfactual delta on hardware | Mechanism offline-tested + remote wiring fixed; one live edit→recompile→delta run still pending | P2 |
 | Gap 4 from C++ emitter `repeat`/`mask` | C++ emitter still defaults these (model reads them; emitter doesn't populate yet) | P2 |
 | Scalar throughput (Vector/20 proxy) | Needs real Scalar calibration (B.4) before trusting as a lower bound | P2 |
 

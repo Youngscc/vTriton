@@ -18,6 +18,31 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "calibration" / "scripts")
 from fit_constants import MSProfRow, read_msprof_csv
 
 
+# Task-type values that real msprof emits for AI compute-core execution.
+# A Triton/HIVM kernel shows up as one of these depending on whether it is
+# cube-only (AI_CORE/AICORE), mixed (MIX_AIC cube-dominant / MIX_AIV
+# vector-dominant), or pure vector (AI_VECTOR_CORE / AIV).  The chunk_kda
+# kernel profiles as MIX_AIC — recognising only "AI_CORE" silently drops it.
+#
+# Exact (set) membership, not substring: msprof task_type is a discrete enum,
+# and substring matching on the short "AIV" token would misclassify any future
+# composite type that happens to contain it (e.g. a hypothetical
+# "HCCL_AIV_TASK").
+_AICORE_TASK_TYPES = frozenset(
+    {"AI_CORE", "AICORE", "MIX_AIC", "MIX_AIV", "AI_VECTOR_CORE", "AIV"}
+)
+
+
+def _is_aicore_task(task_type: str) -> bool:
+    """True if an (already upper-cased, stripped) task_type is AI compute-core.
+
+    Shared by the timing parser and the component-duration aggregator so the
+    two cannot drift — a divergence first surfaced on real hardware, where the
+    timing filter dropped MIX_AIC rows the component mapper kept.
+    """
+    return task_type in _AICORE_TASK_TYPES
+
+
 class TimingResult(NamedTuple):
     """Parsed kernel timing from msprof CSV."""
     t_us: float                      # median duration in microseconds
@@ -80,7 +105,7 @@ def parse_kernel_time_us(
             # Old CANN CSV: fall back to op_type
             task_type = row.op_type.strip().upper() if row.op_type else ""
 
-        if "AI_CORE" in task_type or "AICORE" in task_type:
+        if _is_aicore_task(task_type):
             # Apply op_name filter if specified
             if op_name_filter:
                 if op_name_filter.lower() in row.op_name.lower():
@@ -158,8 +183,8 @@ def parse_component_durations(
 
     Categories: 'aicore', 'mte', 'aicpu', 'other'.
 
-    Map CSV task_type values:
-    - AI_CORE/AiCore/MIX_AIC → 'aicore'
+    Map CSV task_type values (via _is_aicore_task):
+    - AI_CORE/AICORE/MIX_AIC/MIX_AIV/AI_VECTOR_CORE/AIV → 'aicore'
     - MTE* → 'mte'
     - AI_CPU/AiCPU → 'aicpu'
     - else → 'other'
@@ -195,7 +220,7 @@ def parse_component_durations(
         if not task_type:
             task_type = row.op_type.strip().upper() if row.op_type else ""
 
-        if "AI_CORE" in task_type or "AICORE" in task_type or "MIX_AIC" in task_type:
+        if _is_aicore_task(task_type):
             totals["aicore"] += row.duration_us
         elif task_type.startswith("MTE"):
             totals["mte"] += row.duration_us
