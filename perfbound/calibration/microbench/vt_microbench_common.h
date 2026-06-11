@@ -247,6 +247,61 @@ private:
     AscendC::GlobalTensor<half> zGm;
 };
 
+// Scalar pipe (PIPE_S) sustained throughput.
+//
+// Measures the *scalar* ALU, not the vector SIMD engine.  A dependent
+// fused-multiply-add chain on a single scalar register prevents the
+// AscendC compiler from auto-vectorising the loop (each iteration depends
+// on the previous accumulator), so the work is forced onto the scalar
+// issue path.  Two FLOP per iteration (one multiply, one add).
+//
+// The accumulator is written to GM at the end so dead-code elimination
+// cannot drop the loop.  N_iter = kScalarRepeat dependent FMAs.
+constexpr uint32_t kScalarRepeat = 1000000;
+
+class ScalarPeakKernel {
+public:
+    __aicore__ inline void Init(GM_ADDR z)
+    {
+        // 8 floats = one 32-byte block (the minimum UB<->GM DataCopy granule).
+        zGm.SetGlobalBuffer(reinterpret_cast<__gm__ float *>(z), 8);
+        pipe.InitBuffer(zQueue, 1, 8 * sizeof(float));
+    }
+
+    __aicore__ inline void Process()
+    {
+        if (AscendC::GetBlockIdx() != 0) {
+            return;
+        }
+        // Dependent scalar FMA chain: acc = acc * c1 + c2.  Each iteration
+        // depends on the previous accumulator, so the compiler cannot
+        // auto-vectorise and the work stays on the scalar issue path.
+        // The exact constants are irrelevant to timing; they only keep the
+        // recurrence from overflowing or collapsing to a constant.
+        float acc = 1.0f;
+        const float c1 = 1.0000001f;
+        const float c2 = 0.0000001f;
+        for (uint32_t i = 0; i < kScalarRepeat; ++i) {
+            acc = acc * c1 + c2;
+        }
+        // Write the final accumulator to GM so dead-code elimination cannot
+        // drop the loop.  Broadcast into a 32-byte UB block, then copy out.
+        AscendC::LocalTensor<float> out = zQueue.AllocTensor<float>();
+        for (uint32_t i = 0; i < 8; ++i) {
+            out.SetValue(i, acc);
+        }
+        zQueue.EnQue(out);
+        AscendC::LocalTensor<float> deq = zQueue.DeQue<float>();
+        AscendC::DataCopy(zGm, deq, 8);
+        zQueue.FreeTensor(deq);
+    }
+
+private:
+    AscendC::TPipe pipe;
+    AscendC::TQue<AscendC::QuePosition::VECOUT, 1> zQueue;
+    AscendC::GlobalTensor<float> zGm;
+};
+
 class VectorTransKernel {
 public:
     __aicore__ inline void Init(GM_ADDR x, GM_ADDR z)

@@ -154,3 +154,19 @@ PRD to reality (Item 1) and then genuinely closes the open items.
   (non-zero, largest) on real kda_des.json.
 - US-SB-005/006/007/008: RESET to passes=false (matching the honest
   satisfies_us_sb_* flags now present in the evidence JSON). To be closed below.
+
+### Item 3 — US-SB-007 (scalar P_scalar via CCE microbench): ATTEMPTED, BLOCKED, stays passes=false
+- Built a real CCE/AscendC scalar microbench: scalar_peak.cce + ScalarPeakKernel
+  (dependent scalar FMA chain, forces scalar issue path), wired into
+  bench_launcher.cpp and the CMake glob. Compiles + runs on 910B3 (rc=0).
+- BLOCKED on direct measurement (RESULTS.md §8): (1) msprof op-level collection
+  is currently broken on the box — no op_summary for ANY freshly-run kernel
+  incl. a vector kernel that profiled fine on 2026-06-07 (reproduced on clean
+  rebuild + healthy device; NPU:0 health=Alarm); (2) even when working, the
+  scalar unit is only ever profiled as aiv_scalar_time (loop-control
+  sub-component of a vector/cube op), never a standalone arithmetic path.
+- GENUINE SOUNDNESS FIX shipped regardless: added VectorConfig.
+  scalar_throughput_measured (default False); get_scalar_throughput_ops_per_us
+  now falls back to the full measured Vector rate when scalar is unmeasured, so
+  the unsupported derived P_scalar can no longer tighten the bound. Updated
+  calib JSON + 3 tests. Suite green (348 passed).

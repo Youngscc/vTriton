@@ -11,6 +11,7 @@
 #include "aclrtlaunch_mte_gm_to_ub.h"
 #include "aclrtlaunch_mte_l1_to_l0a.h"
 #include "aclrtlaunch_mte_ub_to_gm.h"
+#include "aclrtlaunch_scalar_peak.h"
 #include "aclrtlaunch_vector_peak_elemwise_add.h"
 #include "aclrtlaunch_vector_peak_elemwise_max.h"
 #include "aclrtlaunch_vector_peak_elemwise_min.h"
@@ -83,6 +84,8 @@ bool LaunchKernel(
         ACLRT_LAUNCH_KERNEL(vector_peak_elemwise_min)(kVectorBlockDim, stream, buffers.a, buffers.b, buffers.c);
     } else if (kernel == "vector_peak_transcendental") {
         ACLRT_LAUNCH_KERNEL(vector_peak_transcendental)(kVectorBlockDim, stream, buffers.a, buffers.c);
+    } else if (kernel == "scalar_peak") {
+        ACLRT_LAUNCH_KERNEL(scalar_peak)(kVectorBlockDim, stream, buffers.c);
     } else if (kernel == "mte_gm_to_ub") {
         ACLRT_LAUNCH_KERNEL(mte_gm_to_ub)(kVectorBlockDim, stream, buffers.a, buffers.c, mteStart, mteIters);
     } else if (kernel == "mte_ub_to_gm") {

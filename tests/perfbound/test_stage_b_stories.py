@@ -24,16 +24,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 # ===========================================================================
 
 class TestScalarThroughputCalibration:
-    """Validates the derived scalar throughput constant (Task 5).
+    """Validates scalar-throughput EVIDENCE without treating it as measured.
 
-    The scalar throughput is derived from the measured vector throughput
-    divided by the SIMD width (128), since the scalar ALU processes 1
-    element per cycle vs vector SIMD's 128 per cycle. This replaces the
-    crude Vector/20 proxy with a principled Vector/128 derivation.
-
-    Acceptance (US-SB-007):
-    - Measured P_scalar constant (with CI) replaces Vector/20 proxy
-    - Calibration tests updated
+    US-SB-007 is NOT closed: the stored P_scalar is DERIVED (P_vector / 128),
+    not a direct CCE measurement (RESULTS.md §8 documents the attempted
+    measurement and the msprof/hardware block).  The derived value is retained
+    as evidence but MUST NOT tighten the bound: until scalar_throughput_measured
+    is True, the bound uses the full measured Vector rate as an optimistic
+    upper-rate fallback (can loosen, never illegitimately tighten, the floor).
     """
 
     def test_scalar_constant_exists_in_db(self):
@@ -66,17 +64,36 @@ class TestScalarThroughputCalibration:
             f"vec/scalar ratio should be ~128, got {ratio}"
         )
 
-    def test_scalar_get_throughput_uses_calibrated_value(self):
-        """get_scalar_throughput_ops_per_us returns the calibrated value (not Vector/20)."""
+    def test_unmeasured_scalar_uses_vector_upper_rate(self):
+        """SOUNDNESS: an unmeasured (derived) scalar estimate must NOT tighten
+        the bound. get_scalar_throughput_ops_per_us falls back to the full
+        measured Vector rate while scalar_throughput_measured is False.
+        """
         db = load_default_calib_db()
-        ops_per_us = db.vector.get_scalar_throughput_ops_per_us("fp16")
-        # Calibrated value: 0.0001182 TFLOPS * 1e6 = 118.2 ops/us
-        # Old Vector/20 proxy: 0.015133/20 * 1e6 = 756.7 ops/us (6.4x too high!)
-        assert ops_per_us > 0
-        assert ops_per_us < 200, (
-            f"scalar ops/us should be ~118 (calibrated), not {ops_per_us} "
-            f"(old proxy was ~757)"
+        assert db.vector.scalar_throughput_measured is False, (
+            "scalar is not directly measured yet (US-SB-007 open)"
         )
+        ops_per_us = db.vector.get_scalar_throughput_ops_per_us("fp16")
+        vector_ops_per_us = db.vector.throughput_fp16_tflops * 1e6
+        assert ops_per_us == pytest.approx(vector_ops_per_us), (
+            f"unmeasured scalar must use the Vector upper rate "
+            f"({vector_ops_per_us}), got {ops_per_us}"
+        )
+
+    def test_measured_flag_would_use_calibrated_value(self):
+        """If scalar_throughput_measured were True, the calibrated value drives
+        the bound — guards the soundness gate from the other side.
+        """
+        from perfbound.calibration.constants import VectorConfig
+        vc = VectorConfig(
+            vec_width_elements=128,
+            throughput_fp16_tflops=0.015133235851136873,
+            scalar_throughput_fp16_tflops=0.00011822840508700682,
+            scalar_throughput_measured=True,
+        )
+        ops_per_us = vc.get_scalar_throughput_ops_per_us("fp16")
+        assert ops_per_us == pytest.approx(0.00011822840508700682 * 1e6)
+        assert ops_per_us < 200, "measured scalar rate is ~118 ops/us"
 
     def test_scalar_ci_propagated(self):
         """CI is propagated from the vector measurement (same relative CI)."""
@@ -258,20 +275,23 @@ requires_vecadd_csv = pytest.mark.skipif(
 
 @requires_vecadd_csv
 class TestScalarCalibrationSoundness:
-    """Sanity check: the derived scalar throughput produces sound bounds.
+    """Soundness: an UNMEASURED scalar estimate must not tighten the bound.
 
-    With the calibrated scalar throughput (118 ops/us), any op reassigned to
-    scalar in the two-limit analysis produces a bound that is still >= the
-    idealized floor. This is guaranteed by construction since scalar < vector.
+    While scalar_throughput_measured is False (US-SB-007 open), the bound uses
+    the full measured Vector rate for scalar work. This is an optimistic
+    upper-rate fallback: it can only loosen the time floor, never illegitimately
+    tighten it with the unsupported derived value.
     """
 
-    def test_scalar_slower_than_vector(self):
-        """Derived scalar throughput is strictly less than vector throughput."""
+    def test_unmeasured_scalar_rate_equals_vector(self):
+        """Unmeasured scalar falls back to the Vector rate (no tightening)."""
         db = load_default_calib_db()
         vec_ops = db.vector.throughput_fp16_tflops * 1e6  # FLOP/us
         sca_ops = db.vector.get_scalar_throughput_ops_per_us("fp16")
-        assert sca_ops < vec_ops, (
-            f"scalar ({sca_ops}) must be < vector ({vec_ops}) ops/us"
+        assert db.vector.scalar_throughput_measured is False
+        assert sca_ops == pytest.approx(vec_ops), (
+            f"unmeasured scalar must use the Vector upper rate, "
+            f"got scalar={sca_ops} vector={vec_ops}"
         )
 
 

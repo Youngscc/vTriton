@@ -185,6 +185,49 @@ The set spans both compute-bound (chunk_kda, Tier-2 DES) and memory-bound
 All soundness checks pass — the model never predicts a bound above the
 measured wall-clock time.
 
+## 8. Scalar throughput (US-SB-007) — direct CCE measurement attempted, BLOCKED (2026-06-11)
+
+**Goal:** replace the derived `P_scalar` (= P_vector/128) with a directly
+measured value from a CCE (AscendC, per project convention) microbench on
+910B3, as US-SB-007 requires.
+
+**What was built (committed):**
+- `perfbound/calibration/microbench/scalar_peak.cce` + `ScalarPeakKernel` in
+  `vt_microbench_common.h`: an AIV kernel running a dependent scalar FMA chain
+  (`acc = acc*c1 + c2`, 1e6 iterations) that the compiler cannot vectorise, so
+  the work is forced onto the scalar issue path. Wired into `bench_launcher.cpp`
+  (`--kernel scalar_peak`) and the CMake glob.
+- It **compiles and runs** on 910B3 (`vt_a1_bench_launcher --kernel scalar_peak`
+  returns rc=0; the `scalar_peak` symbol is linked into the launcher).
+
+**Why a clean P_scalar (GFLOPS) is NOT obtainable here — two independent blocks:**
+
+1. **msprof op-level collection is currently broken on this 910B3 box.** A
+   freshly built+run kernel produces *no* `op_summary*.csv` and an empty
+   timeline ("There is no summary data to export"), for **both** the new
+   `scalar_peak` AND `vector_peak_elemwise_add` — the latter profiled cleanly
+   on 2026-06-07 with the identical harness. Reproduced on a clean from-scratch
+   rebuild and on a healthy device (`ASCEND_RT_VISIBLE_DEVICES=1`). NPU:0 reports
+   health=**Alarm** in `npu-smi`. This is a pre-existing environmental/profiling
+   regression, independent of the scalar work.
+
+2. **Even with working profiling, the scalar unit is not independently
+   profilable as a compute path.** In the 2026-06-07 working CSVs, scalar time
+   appears *only* as `aiv_scalar_time(us)` — a sub-component of a vector/cube op
+   (≈73.35 µs across add/mul/max, n=45 each), representing the AIV's
+   **loop-control / address scalar instructions**, not standalone scalar
+   *arithmetic* throughput. A pure-scalar kernel surfaces no op of its own.
+   Deriving a `P_scalar` in GFLOPS from this loop-control time would be a
+   category error (instruction-issue overhead ≠ arithmetic FLOP/s).
+
+**Resolution (honest):** US-SB-007 stays `passes:false`. The derived
+`P_scalar = P_vector/128` is retained as documented evidence only. Critically,
+the bound must NOT be tightened by an unmeasured estimate — the model uses the
+full measured Vector rate as an optimistic upper-rate fallback
+(`scalar_throughput_measured=False`), which can loosen but never illegitimately
+tighten the time floor. The CCE scalar microbench is committed so it can be
+re-run once msprof op-collection is restored on the box.
+
 ## Reproduce
 
 ```bash
