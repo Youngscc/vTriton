@@ -184,3 +184,20 @@ PRD to reality (Item 1) and then genuinely closes the open items.
   bench_launcher path which is what blocked US-SB-007). This unblocks the
   hardware profiling needed by US-SB-006/008.
 - Suite green (351 passed).
+
+### Items 2 & 8 — US-SB-006 (live counterfactual) + US-SB-008 (two-limit HW): ATTEMPTED, BLOCKED, stay passes=false
+- Ran the executable Gap-3 edit on real chunk_kda npuir:
+  tritonsim-hivm --remove-pipe-barrier-index=0 --edited-npuir-file=... emits a
+  bishengir-compilable MLIR (80->79 barriers). Model predicts a 0.0us bound
+  delta — chunk_kda's Gap-3 attribution is ~6e-6, off the binding path.
+- Fixed a genuine latent bug: raise_repeat matched only synthetic pipe names
+  (Cube/Vector/Scalar) and silently no-op'd on every real des.json. Now also
+  matches real tokens PIPE_M/PIPE_V/PIPE_S. With the fix, doubling repeat on
+  chunk_kda moves Gap-4 2.57%->1.55% (model quantifies it) but the bound is
+  unchanged (Gap-4 off chunk_kda's binding core-compute path).
+- Confirmed structural blockers (RESULTS.md §9): DES-JSON edits are not
+  bishengir-compilable; msprof op-collection currently broken for the AscendC
+  launcher path; chunk_kda compiler headroom (44.99us) < measurement noise.
+- HONEST OUTCOME: both stay passes=false. Closure needs a large-headroom
+  gap-seeded kernel through the full NPUIR->des pipeline + a hardware
+  npuir-recompile-and-launch harness (documented next step). raise_repeat fix kept.

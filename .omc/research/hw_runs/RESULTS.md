@@ -246,6 +246,54 @@ full measured Vector rate as an optimistic upper-rate fallback
 tighten the time floor. The CCE scalar microbench is committed so it can be
 re-run once msprof op-collection is restored on the box.
 
+## 9. US-SB-006 (live gap counterfactual) + US-SB-008 (two-limit HW reachability) — attempted, BLOCKED (2026-06-11)
+
+Both stories need a *measurable* gap removed on real hardware. Every concrete
+path was tried; each hits a real blocker on the one kernel with a full
+NPUIR→des.json pipeline (chunk_kda).
+
+**Executable Gap-3 edit works analytically but predicts a 0 µs delta.**
+`tritonsim-hivm --remove-pipe-barrier-index=N --edited-npuir-file=...` removes a
+pipe_barrier through the MLIR API and emits a bishengir-compilable
+`.npuir.mlir` (verified: 80→79 barriers). But the model's predicted bound delta
+for chunk_kda is **0.0 µs** — chunk_kda's Gap-3 attribution is 6.2e-6 (≈0), so
+removing a barrier does not move the binding component floor. Nothing measurable
+to validate.
+
+**Gap-4 (`raise_repeat`) moves the attribution but not the bound.** After
+fixing `raise_repeat` to match the real des.json pipe tokens (`PIPE_M/PIPE_V/
+PIPE_S` — it previously only matched the synthetic `Cube/Vector/Scalar` names
+and silently no-op'd on every real kernel), doubling repeat on chunk_kda drops
+Gap-4 from 2.569%→1.555% (the model *does* quantify the change), but the bound
+stays 46,109.91 µs: Gap-4 is an attribution fraction, not on chunk_kda's binding
+core-compute path. Again no measurable bound delta.
+
+**The DES-JSON edit → bishengir → hardware path is structurally invalid.**
+`raise_repeat`/`insert_pingpong`/`merge_transfers` mutate **DES-graph JSON**,
+which is analytical-only; `recompile_remote` would feed it to
+`bishengir-compile`, which accepts MLIR, not des.json. The only executable edit
+(`--remove-pipe-barrier-index`) is the pipe-barrier eraser above, and it lands
+on chunk_kda's zero-Gap-3.
+
+**msprof op-collection is currently broken for the AscendC-launcher path**
+(§8); the triton/`kernel_launcher.py` path works (used for §7), but there is no
+proven NPUIR→bishengir-binary→aclrtLaunch path to run an *edited* chunk_kda
+npuir on device and fetch its output for equivalence checking.
+
+**Fallback (simpler kernel with large, measurable compiler headroom) not
+completed:** it requires a *second* gap-seeded kernel carried through the full
+NPUIR→des.json pipeline plus a hardware npuir-recompile-and-launch harness that
+is not proven end-to-end in this tree. Documented as the next concrete step.
+
+**Honest outcome:** US-SB-006 and US-SB-008 remain `passes:false`. The
+analytical two-limit ordering (T_bound_HIVM ≤ T_bound_DSL ≤ T_measured) and the
+model's gap-quantification mechanism are validated on real chunk_kda data, and
+the executable Gap-3 edit is proven to emit bishengir-compilable MLIR — but
+chunk_kda's compiler headroom is below measurement noise, so no hardware
+speedup can be validated on it, and no alternative large-headroom kernel was
+carried to a hardware measurement. The `raise_repeat` real-pipe fix is kept as a
+genuine bug fix.
+
 ## Reproduce
 
 ```bash
