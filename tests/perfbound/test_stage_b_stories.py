@@ -375,12 +375,16 @@ requires_multi_kernel = pytest.mark.skipif(
 
 SOFTMAX_CSV = PROJECT_ROOT / "tests" / "perfbound" / "fixtures" / "softmax_op_summary_910b3.csv"
 LAYERNORM_CSV = PROJECT_ROOT / "tests" / "perfbound" / "fixtures" / "layernorm_op_summary_910b3.csv"
+RMSNORM_CSV = PROJECT_ROOT / "tests" / "perfbound" / "fixtures" / "rmsnorm_op_summary_910b3.csv"
 
 requires_softmax_csv = pytest.mark.skipif(
     not SOFTMAX_CSV.exists(), reason="softmax op_summary fixture not present"
 )
 requires_layernorm_csv = pytest.mark.skipif(
     not LAYERNORM_CSV.exists(), reason="layernorm op_summary fixture not present"
+)
+requires_rmsnorm_csv = pytest.mark.skipif(
+    not RMSNORM_CSV.exists(), reason="rmsnorm op_summary fixture not present"
 )
 
 
@@ -407,6 +411,26 @@ class TestMultiKernelValidation:
         data = self._load_results()
         assert data["n_kernels"] >= 5, (
             f"Need >= 5 kernels, got {data['n_kernels']}"
+        )
+
+    def test_at_least_five_distinct_kernels(self):
+        """>= 5 DISTINCT kernels (vector_add shape variants collapse to one).
+
+        US-SB-005 closure requires distinct kernels, not just shape variants.
+        Collapses vector_add_16m/32m to a single 'vector_add' family.
+        """
+        data = self._load_results()
+        families = set()
+        for k in data["kernels"]:
+            name = k["kernel"]
+            if name.startswith("vector_add"):
+                name = "vector_add"
+            else:
+                # strip a trailing shape tag like _8kx2k / _16m
+                name = name.rsplit("_", 1)[0] if name.rsplit("_", 1)[-1][:1].isdigit() else name
+            families.add(name)
+        assert len(families) >= 5, (
+            f"Need >= 5 distinct kernels, got {len(families)}: {sorted(families)}"
         )
 
     def test_soundness_rate_is_one(self):
@@ -519,4 +543,34 @@ class TestLayernormKernelSoundness:
         t_bound = hbm_bytes / self.HBM_BW_BYTES_PER_US
         assert t_bound <= result.t_us, (
             f"layernorm HBM floor ({t_bound:.2f} us) > T_measured ({result.t_us:.3f} us)"
+        )
+
+
+@requires_rmsnorm_csv
+class TestRmsnormKernelSoundness:
+    """Rmsnorm-specific soundness: T_measured parsed from CSV >= HBM floor.
+
+    rmsnorm is the 5th distinct kernel (US-SB-005). RMSNorm forward
+    (8192x2048 fp32): mean-of-squares reduction + rsqrt scale + weight.
+    """
+
+    ROWS = 8192
+    N_COLS = 2048
+    ELEMENT_SIZE = 4  # fp32
+    HBM_BW_BYTES_PER_US = 1.525e6
+
+    def test_rmsnorm_csv_has_kernel_rows(self):
+        """The fixture CSV contains rmsnorm_kernel rows."""
+        from perfbound.validate.msprof_parser import parse_kernel_time_us
+        result = parse_kernel_time_us(str(RMSNORM_CSV), op_name_filter="rmsnorm_kernel")
+        assert result.t_us > 0, "rmsnorm kernel time must be > 0"
+
+    def test_rmsnorm_hbm_floor_soundness(self):
+        """T_bound (HBM floor) <= T_measured for rmsnorm."""
+        from perfbound.validate.msprof_parser import parse_kernel_time_us
+        result = parse_kernel_time_us(str(RMSNORM_CSV), op_name_filter="rmsnorm_kernel")
+        hbm_bytes = 2 * self.ROWS * self.N_COLS * self.ELEMENT_SIZE
+        t_bound = hbm_bytes / self.HBM_BW_BYTES_PER_US
+        assert t_bound <= result.t_us, (
+            f"rmsnorm HBM floor ({t_bound:.2f} us) > T_measured ({result.t_us:.3f} us)"
         )

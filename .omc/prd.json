@@ -73,8 +73,8 @@
         "CI test loading the fixtures passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": "OPEN (reset 2026-06-11 to match honest evidence; multi_kernel_results.json self-declares satisfies_us_sb_005=false). PILOT: 5 kernels profiled on 910B3 with soundness_rate=1.0, but vector_add is double-counted as two shape variants (16M/32M) and 4/5 use the loose analytic HBM floor (only chunk_kda is Tier-2 DES). Need a 5th DISTINCT kernel and/or upgrade kernels to Tier-2 des bounds via --npuir-file. soundness_rate must stay 1.0."
+      "passes": true,
+      "notes": "CLOSED 2026-06-11. Added rmsnorm_8kx2k as the 5th DISTINCT kernel (profiled on 910B3 via triton/msprof; T_measured=702.86us, HBM floor 88.01us, 7.99x, PASS; correctness verified vs torch reference, rel err 1.1e-7). Validation set now: 6 entries / 5 distinct families (chunk_kda[tier2_des], vector_add[16m/32m], softmax, layernorm, rmsnorm), soundness_rate=1.0 (no BOUND_VIOLATION). The vector_add double-count is no longer the sole source of distinctness. Acceptance criteria met (>=5 kernels with T_bound/T_measured/status/tightness/component_match, soundness_rate==1.0, CI green: TestMultiKernelValidation incl. test_at_least_five_distinct_kernels + TestRmsnormKernelSoundness). HONEST LIMITATION: Tier-2 DES coverage remains chunk_kda-only; the 4 vector kernels use the conservative analytic HBM floor (a sound lower bound). The full Part-B campaign targets a broader >=30-kernel suite with more Tier-2 bounds, tracked separately in stage_b_remainder_handoff.md."
     },
     {
       "id": "US-SB-006",

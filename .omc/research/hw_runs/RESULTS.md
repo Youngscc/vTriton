@@ -148,13 +148,13 @@ access pattern. `ascend-tiling-opt` is the tool to search this space using the
 white-box model. Direct HIVM IR editing provides marginal improvement (~0.04%)
 and lacks a back-compilation path to hardware.
 
-## 7. Multi-kernel validation set — US-SB-005 complete (2026-06-11)
+## 7. Multi-kernel validation set — US-SB-005 (2026-06-11)
 
-Added two vector kernels (softmax, layernorm) to reach the n≥5 target. Both
-profiled on 910B3 via `msprof` + `kernel_launcher.py`, correctness verified
-via mathematical invariants.
+Profiled on 910B3 via `msprof` + `kernel_launcher.py`, correctness verified
+against torch references / mathematical invariants. The 5th DISTINCT kernel
+(rmsnorm) was added 2026-06-11 to remove the vector_add double-count critique.
 
-### Validation set summary (5/5 kernels)
+### Validation set summary (6 entries / 5 distinct kernels)
 
 | Kernel | Bound kind | T_bound (µs) | T_measured (µs) | Tightness | Status |
 |--------|-----------|-------------|-----------------|-----------|--------|
@@ -163,8 +163,26 @@ via mathematical invariants.
 | vector_add_32m | analytic_hbm_floor | 251.66 | 605.25 | 2.41× | PASS |
 | softmax_8kx2k | analytic_hbm_floor | 88.01 | 305.07 | 3.47× | PASS |
 | layernorm_8kx2k | analytic_hbm_floor | 88.01 | 608.39 | 6.91× | PASS |
+| rmsnorm_8kx2k | analytic_hbm_floor | 88.01 | 702.86 | 7.99× | PASS |
 
-**soundness_rate = 1.0** (no BOUND_VIOLATION across all 5 kernels).
+**soundness_rate = 1.0** (no BOUND_VIOLATION across all 6 entries). Five
+distinct kernel families: chunk_kda, vector_add, softmax, layernorm, rmsnorm.
+Tier-2 DES coverage remains chunk_kda-only; the vector kernels use the
+conservative analytic HBM floor (a sound lower bound). The broader >=30-kernel
+Part-B campaign with more Tier-2 bounds is tracked in
+`stage_b_remainder_handoff.md`.
+
+**rmsnorm_8kx2k**: RMSNorm forward (8192×2048, fp32). Mean-of-squares
+reduction + rsqrt scale + weight (lighter reduction than layernorm; no mean
+subtraction). AI_VECTOR_CORE; 11 msprof invocations; T_measured =
+median(post-warmup) = 702.86 µs; HBM floor = 88.01 µs. Correctness verified vs
+torch reference: max_abs_err=1.9e-6, rel=1.1e-7, finite.
+
+**msprof path note (2026-06-11):** the triton/`kernel_launcher.py` + `msprof`
+path produces a valid `op_summary` CSV (verified live for rmsnorm). The
+separate AscendC `bench_launcher` path currently yields no `op_summary` on this
+box (see §8) — that regression does not affect the triton-kernel measurements
+in this table.
 
 ### Kernel details
 

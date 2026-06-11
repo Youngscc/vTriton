@@ -170,3 +170,17 @@ PRD to reality (Item 1) and then genuinely closes the open items.
   now falls back to the full measured Vector rate when scalar is unmeasured, so
   the unsupported derived P_scalar can no longer tighten the bound. Updated
   calib JSON + 3 tests. Suite green (348 passed).
+
+### Item 5 — US-SB-005 (strengthen n>=5 set): CLOSED, passes=true
+- Added rmsnorm_8kx2k as the 5th DISTINCT kernel: profiled live on 910B3 via
+  the triton/kernel_launcher.py + msprof path (T_measured=702.86us, HBM floor
+  88.01us, 7.99x, PASS). Correctness verified vs torch reference (rel 1.1e-7).
+- Validation set now 6 entries / 5 distinct families (chunk_kda[tier2_des],
+  vector_add, softmax, layernorm, rmsnorm); soundness_rate=1.0. vector_add
+  double-count is no longer the sole distinctness source.
+- Fetched test/rmsnorm_bench.py + rmsnorm_op_summary_910b3.csv into the tree;
+  added test_at_least_five_distinct_kernels + TestRmsnormKernelSoundness.
+- KEY FINDING: the triton/msprof path WORKS on the box (unlike the AscendC
+  bench_launcher path which is what blocked US-SB-007). This unblocks the
+  hardware profiling needed by US-SB-006/008.
+- Suite green (351 passed).

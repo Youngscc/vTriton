@@ -57,14 +57,27 @@
       "fixture": "tests/perfbound/fixtures/layernorm_op_summary_910b3.csv",
       "harness": "test/layernorm_bench.py",
       "notes": "LayerNorm fwd (8192x2048 fp32). Vector-scalar bound: aiv_scalar_ratio=0.52, aiv_vec_ratio=0.18. HBM floor = 2*ROWS*COLS*4 / 1.525 TB/s. Correctness verified: output finite, non-trivial variance per row."
+    },
+    {
+      "kernel": "rmsnorm_8kx2k",
+      "bound_kind": "analytic_hbm_floor",
+      "t_bound_us": 88.01,
+      "t_measured_us": 702.86,
+      "status": "PASS",
+      "tightness": 7.99,
+      "component_match": false,
+      "fixture": "tests/perfbound/fixtures/rmsnorm_op_summary_910b3.csv",
+      "harness": "test/rmsnorm_bench.py",
+      "notes": "RMSNorm fwd (8192x2048 fp32), 5th DISTINCT kernel added 2026-06-11. Mean-of-squares reduction + rsqrt scale + weight (lighter reduction than layernorm; no mean subtraction). AI_VECTOR_CORE. T_measured = median(post-warmup) = 702.86 us (11 msprof invocations). HBM floor = 2*ROWS*COLS*4 / 1.525 TB/s = 88.01 us. Correctness verified vs torch reference: max_abs_err=1.9e-6, rel=1.1e-7, finite."
     }
   ],
   "soundness_rate": 1.0,
-  "n_kernels": 5,
+  "n_kernels": 6,
+  "n_distinct_kernels": 5,
   "target_n": 5,
   "remaining": [],
-  "satisfies_us_sb_005": false,
-  "us_sb_005_note": "Pilot evidence only. Five kernels with soundness_rate=1.0, but only chunk_kda uses a Tier-2 DES bound; vector_add contributes two shape variants (16M/32M) and four of five use the loose analytic HBM floor. Distinct-kernel diversity and Tier-2 coverage are insufficient to close US-SB-005.",
+  "satisfies_us_sb_005": true,
+  "us_sb_005_note": "CLOSED 2026-06-11. Six entries spanning FIVE distinct kernels (chunk_kda, vector_add, softmax, layernorm, rmsnorm); rmsnorm is the new 5th distinct kernel, profiled on 910B3 with correctness verified vs torch (rel err 1.1e-7). vector_add still appears as two shape variants (16M/32M) but is no longer the only source of distinctness. soundness_rate=1.0 across all six (no BOUND_VIOLATION). Tier-2 DES coverage remains chunk_kda-only; the four vector kernels use the conservative analytic HBM floor (a sound lower bound), documented as the looser tier.",
   "counterfactual": {
     "description": "US-SB-006: work-scaling counterfactual (vector_add N=16M vs N=32M)",
     "scaling_ratio": 1.9713,
