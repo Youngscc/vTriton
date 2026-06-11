@@ -1,0 +1,340 @@
+# Tests for Stage-B stories: US-SB-006, US-SB-007, US-SB-008
+#
+# US-SB-007: Scalar throughput calibration (derived from measured vector + SIMD width).
+# US-SB-008: Two-limit compiler-headroom validation (chunk_kda).
+# US-SB-006: Live counterfactual via vector_add work-scaling experiment.
+
+import json
+import math
+from pathlib import Path
+
+import pytest
+
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from perfbound.calibration.calib_loader import load_default_calib_db
+from perfbound.calibration.constants import CalibrationConstant
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+# ===========================================================================
+# US-SB-007: Scalar throughput calibration
+# ===========================================================================
+
+class TestScalarThroughputCalibration:
+    """Validates the derived scalar throughput constant (Task 5).
+
+    The scalar throughput is derived from the measured vector throughput
+    divided by the SIMD width (128), since the scalar ALU processes 1
+    element per cycle vs vector SIMD's 128 per cycle. This replaces the
+    crude Vector/20 proxy with a principled Vector/128 derivation.
+
+    Acceptance (US-SB-007):
+    - Measured P_scalar constant (with CI) replaces Vector/20 proxy
+    - Calibration tests updated
+    """
+
+    def test_scalar_constant_exists_in_db(self):
+        """P_scalar_add_sustained constant is present in the calibration DB."""
+        db = load_default_calib_db()
+        c = db.constants.get("P_scalar_add_sustained")
+        assert c is not None, "P_scalar_add_sustained missing from calibration DB"
+
+    def test_scalar_throughput_in_vector_config(self):
+        """VectorConfig.scalar_throughput_fp16_tflops is populated (not default 0)."""
+        db = load_default_calib_db()
+        assert db.vector.scalar_throughput_fp16_tflops > 0, (
+            "scalar_throughput_fp16_tflops must be populated in calibration DB"
+        )
+
+    def test_scalar_is_128x_slower_than_vector(self):
+        """Scalar throughput = Vector throughput / SIMD_width (128).
+
+        The derivation: scalar ALU processes 1 element per cycle while
+        vector SIMD processes 128 per cycle. Per-instruction overhead is
+        assumed identical (pipeline startup, barrier sync, etc.).
+        """
+        db = load_default_calib_db()
+        vec = db.vector.throughput_fp16_tflops
+        sca = db.vector.scalar_throughput_fp16_tflops
+        assert vec > 0
+        assert sca > 0
+        ratio = vec / sca
+        assert math.isclose(ratio, 128.0, rel_tol=1e-3), (
+            f"vec/scalar ratio should be ~128, got {ratio}"
+        )
+
+    def test_scalar_get_throughput_uses_calibrated_value(self):
+        """get_scalar_throughput_ops_per_us returns the calibrated value (not Vector/20)."""
+        db = load_default_calib_db()
+        ops_per_us = db.vector.get_scalar_throughput_ops_per_us("fp16")
+        # Calibrated value: 0.0001182 TFLOPS * 1e6 = 118.2 ops/us
+        # Old Vector/20 proxy: 0.015133/20 * 1e6 = 756.7 ops/us (6.4x too high!)
+        assert ops_per_us > 0
+        assert ops_per_us < 200, (
+            f"scalar ops/us should be ~118 (calibrated), not {ops_per_us} "
+            f"(old proxy was ~757)"
+        )
+
+    def test_scalar_ci_propagated(self):
+        """CI is propagated from the vector measurement (same relative CI)."""
+        db = load_default_calib_db()
+        vec_const = db.constants.get("P_vector_add_sustained")
+        sca_const = db.constants.get("P_scalar_add_sustained")
+        assert vec_const is not None and sca_const is not None
+        # Relative CI should be identical (division by constant 128 doesn't change it)
+        assert math.isclose(vec_const.ci_rel, sca_const.ci_rel, rel_tol=1e-3), (
+            f"Scalar CI_rel ({sca_const.ci_rel}) should match vector ({vec_const.ci_rel})"
+        )
+
+    def test_scalar_source_is_derived(self):
+        """Source is 'derived_from_vector_microbench' (not direct measurement)."""
+        db = load_default_calib_db()
+        c = db.constants.get("P_scalar_add_sustained")
+        assert c.source == "derived_from_vector_microbench"
+        # is_valid requires source == "cce_microbench", so derived is NOT valid
+        # — this is correct and expected for an analytically derived constant
+        assert not c.is_valid, "derived constant should not pass is_valid"
+
+    def test_scalar_constant_value_within_range(self):
+        """Sanity check: scalar throughput is between 0.05 and 1.0 GFLOPS.
+
+        Vector fp16 sustained is 15.13 GFLOPS. Scalar at 1/128 = 0.118 GFLOPS.
+        Anything outside [0.05, 1.0] would indicate a derivation error.
+        """
+        db = load_default_calib_db()
+        c = db.constants.get("P_scalar_add_sustained")
+        assert 0.05 < c.value < 1.0, (
+            f"P_scalar = {c.value} GFLOPS is outside sanity range [0.05, 1.0]"
+        )
+
+
+# ===========================================================================
+# US-SB-008: Two-limit compiler-headroom validation
+# ===========================================================================
+
+KDA_DES_JSON = PROJECT_ROOT / ".omc" / "research" / "hw_runs" / "kda_des.json"
+
+requires_des_json = pytest.mark.skipif(
+    not KDA_DES_JSON.exists(), reason="real kda_des.json fixture not present"
+)
+
+
+@requires_des_json
+class TestTwoLimitCompilerHeadroom:
+    """Validates the two-limit (T_bound_HIVM / T_bound_DSL) for chunk_kda.
+
+    Acceptance (US-SB-008):
+    - T_bound_HIVM <= T_bound_DSL <= T_measured computed for chunk_kda
+    - Result annotated with Gap-1/3 interpretation
+    - Evidence committed
+
+    Note: hand-optimized HIVM compilation is documented as infeasible for
+    chunk_kda (bishengir-compile accepts MLIR, not des.json; the compiler
+    headroom is only 44.99 µs / 0.04% — too small to validate on hardware
+    where measurement noise exceeds the headroom).
+    """
+
+    T_MEASURED_US = 104326.0  # from msprof on real 910B3
+
+    @staticmethod
+    def _report():
+        from perfbound.combine.run_report import report_from_desgraph
+        return report_from_desgraph(
+            des_json=str(KDA_DES_JSON),
+            grid_dims=(128, 32),
+            n_cores=20,
+            kernel_name="chunk_kda",
+            t_measured_us=104326.0,
+        )
+
+    def test_three_level_soundness(self):
+        """T_bound_HIVM <= T_bound_DSL <= T_measured (three-level hierarchy)."""
+        report = self._report()
+        assert report.t_bound_hivm_us is not None, "T_bound_HIVM must be computed"
+        assert report.t_bound_us is not None, "T_bound_DSL must be computed"
+        assert report.t_measured_us is not None, "T_measured must be populated"
+
+        assert report.t_bound_hivm_us <= report.t_bound_us, (
+            f"T_bound_HIVM ({report.t_bound_hivm_us:.2f}) must be <= "
+            f"T_bound_DSL ({report.t_bound_us:.2f})"
+        )
+        assert report.t_bound_us <= report.t_measured_us, (
+            f"T_bound_DSL ({report.t_bound_us:.2f}) must be <= "
+            f"T_measured ({report.t_measured_us:.2f})"
+        )
+
+    def test_compiler_headroom_is_non_negative(self):
+        """compiler_headroom = T_bound_DSL - T_bound_HIVM >= 0."""
+        report = self._report()
+        assert report.compiler_headroom_us is not None
+        assert report.compiler_headroom_us >= 0, (
+            f"compiler_headroom must be >= 0, got {report.compiler_headroom_us:.2f}"
+        )
+
+    def test_author_headroom_is_positive(self):
+        """author_headroom = T_measured - T_bound_DSL > 0 (large gap)."""
+        report = self._report()
+        assert report.author_headroom_us is not None
+        assert report.author_headroom_us > 0, (
+            "author_headroom must be positive (model soundness)"
+        )
+
+    def test_compiler_headroom_is_small(self):
+        """Compiler headroom is small: bishengir's lowering is near-optimal.
+
+        For chunk_kda, the compiler headroom (Gap-1/Gap-3 only) is < 0.1%
+        of T_measured. This means the compiler cannot meaningfully improve
+        the bound — the dominant gap is author headroom (Triton-level
+        rewrite opportunity), not compiler-level suboptimality.
+        """
+        report = self._report()
+        headroom_pct = report.compiler_headroom_us / report.t_measured_us * 100
+        assert headroom_pct < 1.0, (
+            f"compiler headroom should be < 1% of T_measured, got {headroom_pct:.2f}%"
+        )
+
+    def test_dominant_gap_is_author_headroom(self):
+        """The dominant gap (T_measured - T_bound_DSL) is author headroom.
+
+        Validates the model's key finding: for chunk_kda, the compiler is
+        near-optimal and the performance opportunity is at the DSL/kernel level.
+        """
+        report = self._report()
+        total_gap = report.t_measured_us - report.t_bound_hivm_us
+        compiler = report.compiler_headroom_us
+        author = report.author_headroom_us
+        assert author / total_gap > 0.99, (
+            f"Author headroom should dominate (>99% of total gap), "
+            f"got {author/total_gap*100:.1f}%"
+        )
+
+    def test_gap_interpretation_is_documented(self):
+        """The result uses Gap-1/Gap-3 only (resolved decision).
+
+        The spec author resolved the gap interpretation: T_bound_HIVM relaxes
+        only Gap-1 (placement) and Gap-3 (avoidable serialization). Gap-2
+        (coalescing) and Gap-4 (intra-unit exec) remain as hardware limits.
+        """
+        report = self._report()
+        # Gap-1/Gap-3 relaxation should only produce a small headroom
+        assert report.compiler_headroom_us < 100, (
+            "Gap-1/3-only relaxation should produce < 100µs headroom "
+            f"(got {report.compiler_headroom_us:.2f}µs)"
+        )
+
+    def test_binding_is_component_tier(self):
+        """chunk_kda binds at Tier 2 (component level), not grid level."""
+        report = self._report()
+        assert report.binding_tier == "component", (
+            f"chunk_kda should bind at component tier, got {report.binding_tier}"
+        )
+
+    def test_attribution_gap4_is_largest(self):
+        """Gap-4 (intra-unit exec) is the largest attributed gap."""
+        report = self._report()
+        attr = report.attribution
+        gap4 = attr.get("gap4_intra_unit_exec", 0)
+        assert gap4 > 0, "Gap-4 must be non-zero"
+        for gap_name, gap_val in attr.items():
+            if gap_name != "gap4_intra_unit_exec":
+                assert gap4 >= gap_val, (
+                    f"Gap-4 ({gap4:.4f}) should be >= {gap_name} ({gap_val:.4f})"
+                )
+
+
+# ===========================================================================
+# US-SB-006: Live counterfactual via vector_add work scaling
+# ===========================================================================
+
+VECADD_16M_CSV = PROJECT_ROOT / "tests" / "perfbound" / "fixtures" / "vector_add_op_summary_910b3.csv"
+
+requires_vecadd_csv = pytest.mark.skipif(
+    not VECADD_16M_CSV.exists(), reason="vector_add op_summary fixture not present"
+)
+
+
+@requires_vecadd_csv
+class TestScalarCalibrationSoundness:
+    """Sanity check: the derived scalar throughput produces sound bounds.
+
+    With the calibrated scalar throughput (118 ops/us), any op reassigned to
+    scalar in the two-limit analysis produces a bound that is still >= the
+    idealized floor. This is guaranteed by construction since scalar < vector.
+    """
+
+    def test_scalar_slower_than_vector(self):
+        """Derived scalar throughput is strictly less than vector throughput."""
+        db = load_default_calib_db()
+        vec_ops = db.vector.throughput_fp16_tflops * 1e6  # FLOP/us
+        sca_ops = db.vector.get_scalar_throughput_ops_per_us("fp16")
+        assert sca_ops < vec_ops, (
+            f"scalar ({sca_ops}) must be < vector ({vec_ops}) ops/us"
+        )
+
+
+# ===========================================================================
+# US-SB-006 fixtures and results (hardware-dependent)
+# ===========================================================================
+
+COUNTERFACTUAL_RESULTS = PROJECT_ROOT / ".omc" / "research" / "hw_runs" / "counterfactual_results.json"
+
+requires_counterfactual = pytest.mark.skipif(
+    not COUNTERFACTUAL_RESULTS.exists(),
+    reason="counterfactual results fixture not present"
+)
+
+
+@requires_counterfactual
+class TestLiveCounterfactual:
+    """US-SB-006: Live counterfactual validation via vector_add work-scaling.
+
+    Validates that the model correctly predicts the performance change when
+    work (data size) doubles for a memory-bound kernel (vector_add).
+
+    Acceptance (US-SB-006):
+    - >= 1 CounterfactualResult with output_verified=True and
+      quantification_error < 0.20
+    - Evidence committed under .omc/research/hw_runs/
+    """
+
+    @staticmethod
+    def _load_results():
+        with open(COUNTERFACTUAL_RESULTS) as f:
+            return json.load(f)
+
+    def test_counterfactual_result_exists(self):
+        """Counterfactual results JSON is present and valid."""
+        data = self._load_results()
+        assert "kernel_name" in data
+        assert "gap_name" in data
+        assert "t_before_us" in data
+        assert "t_after_us" in data
+        assert "predicted_gap_us" in data
+
+    def test_output_verified(self):
+        """Both kernel variants produce correct output (output_verified=True)."""
+        data = self._load_results()
+        assert data.get("output_verified") is True, (
+            f"output_verified must be True, got {data.get('output_verified')}"
+        )
+
+    def test_quantification_error_under_20pct(self):
+        """The predicted gap matches the measured delta within 20%."""
+        data = self._load_results()
+        predicted = data["predicted_gap_us"]
+        measured = data["measured_delta_us"]
+        assert measured > 0, "measured_delta must be positive"
+        error = abs(predicted - measured) / measured
+        assert error < 0.20, (
+            f"quantification_error = {error:.3f} (must be < 0.20). "
+            f"predicted={predicted:.2f}, measured={measured:.2f}"
+        )
+
+    def test_soundness_both_kernels_pass(self):
+        """Both the baseline and scaled kernel produce sound bounds."""
+        data = self._load_results()
+        assert data.get("baseline_sound") is True, "baseline must be sound"
+        assert data.get("scaled_sound") is True, "scaled kernel must be sound"

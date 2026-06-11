@@ -433,6 +433,7 @@ class CalibrationDB:
                 "vec_width_elements": self.vector.vec_width_elements,
                 "throughput_fp16_tflops": self.vector.throughput_fp16_tflops,
                 "throughput_fp32_tflops": self.vector.throughput_fp32_tflops,
+                "scalar_throughput_fp16_tflops": self.vector.scalar_throughput_fp16_tflops,
             },
             "memory": {
                 "gm_size_gb": self.memory.gm_size_gb,
@@ -478,6 +479,7 @@ class CalibrationDB:
             vec_width_elements=vec_d.get("vec_width_elements", 128),
             throughput_fp16_tflops=vec_d.get("throughput_fp16_tflops", 0.0),
             throughput_fp32_tflops=vec_d.get("throughput_fp32_tflops", 0.0),
+            scalar_throughput_fp16_tflops=vec_d.get("scalar_throughput_fp16_tflops", 0.0),
         )
         # Memory hierarchy
         mem_d = d.get("memory", {})

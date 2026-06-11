@@ -1,12 +1,8 @@
-"""Launcher-compatible vector-add kernel for multi-kernel validation (US-SB-005).
+"""vector_add 2x variant for counterfactual (US-SB-006).
 
-Unlike test/triton_hivm_launch_smoke.py (which has a bare main() that returns
-None and is incompatible with scripts/kernel_launcher.py's output capture), this
-exposes the standard build_inputs()/Model contract so remote_bench can profile
-it AND dump its output for correctness.
-
-A large (16 M element) fp32 add: an MTE/HBM-bound kernel — a useful soundness
-data point distinct from the compute-bound chunk_kda.
+Same as vector_add_bench.py but with N=32M (2x the data). Used for the
+work-scaling counterfactual experiment: profile both N=16M and N=32M,
+verify the model predicts the scaling correctly.
 """
 import os
 import torch
@@ -25,7 +21,7 @@ def add_kernel(x_ptr, y_ptr, out_ptr, n_elements, BLOCK: tl.constexpr):
     tl.store(out_ptr + offsets, x + y, mask=mask)
 
 
-N_ELEMENTS = int(os.environ.get("VECADD_N_ELEMENTS", str(16 * 1024 * 1024)))  # default 16M
+N_ELEMENTS = 32 * 1024 * 1024  # 32 M (2x the baseline)
 BLOCK = 2048
 
 
@@ -47,11 +43,11 @@ class Model(nn.Module):
 
 
 def reference(x, y):
-    """CPU reference for correctness checks (run_counterfactual reference_fn)."""
+    """CPU reference for correctness checks."""
     return x + y
 
 
 if __name__ == "__main__":
     data = build_inputs()
     out = Model().forward(data)[0]
-    print("vector_add launch OK", out.shape, out.dtype)
+    print("vector_add_2x launch OK", out.shape, out.dtype)

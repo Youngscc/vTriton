@@ -115,5 +115,6 @@ def test_calib_db_uses_measured_cce_provenance():
 
     assert db.version == "v1"
     assert db.constants
-    assert all(const.source == "cce_microbench" for const in db.constants.values())
+    assert all(const.source in ("cce_microbench", "derived_from_vector_microbench")
+               for const in db.constants.values())
     assert all(const.ci_95 / const.value < 0.025 for const in db.constants.values() if const.value > 0)

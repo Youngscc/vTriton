@@ -13,19 +13,56 @@
       "des": ".omc/research/hw_runs/kda_des.json"
     },
     {
-      "kernel": "vector_add",
+      "kernel": "vector_add_16m",
       "bound_kind": "analytic_hbm_floor",
       "t_bound_us": 125.83,
-      "t_measured_us": 309.55,
+      "t_measured_us": 307.03,
       "status": "PASS",
-      "tightness": 2.46,
+      "tightness": 2.44,
       "component_match": false,
       "fixture": "tests/perfbound/fixtures/vector_add_op_summary_910b3.csv",
       "harness": "test/vector_add_bench.py"
+    },
+    {
+      "kernel": "vector_add_32m",
+      "bound_kind": "analytic_hbm_floor",
+      "t_bound_us": 251.66,
+      "t_measured_us": 605.25,
+      "status": "PASS",
+      "tightness": 2.41,
+      "component_match": false,
+      "fixture": "tests/perfbound/fixtures/vector_add_2x_op_summary_910b3.csv",
+      "harness": "test/vector_add_2x_bench.py"
     }
   ],
   "soundness_rate": 1.0,
-  "n_kernels": 2,
+  "n_kernels": 3,
   "target_n": 5,
-  "remaining": ["softmax", "layernorm", "one more (e.g. matmul or rmsnorm)"]
+  "remaining": ["softmax", "layernorm"],
+  "counterfactual": {
+    "description": "US-SB-006: work-scaling counterfactual (vector_add N=16M vs N=32M)",
+    "scaling_ratio": 1.9713,
+    "predicted_ratio": 2.0,
+    "quantification_error": 0.0295,
+    "is_valid": true,
+    "evidence": ".omc/research/hw_runs/counterfactual_results.json"
+  },
+  "two_limit": {
+    "description": "US-SB-008: two-limit compiler-headroom for chunk_kda",
+    "t_bound_hivm_us": 46064.92,
+    "t_bound_dsl_us": 46109.91,
+    "t_measured_us": 104326.0,
+    "compiler_headroom_us": 44.99,
+    "author_headroom_us": 58216.09,
+    "gap_interpretation": "Gap-1/Gap-3 only (resolved by spec author 2026-06-11)",
+    "finding": "Compiler headroom is negligible (0.04% of measured). Author headroom dominates at 55.8%. bishengir's lowering is near-optimal for chunk_kda."
+  },
+  "scalar_calibration": {
+    "description": "US-SB-007: derived scalar throughput from measured vector + SIMD width",
+    "p_scalar_gflops": 0.1182,
+    "p_vector_gflops": 15.133,
+    "ratio": "vector/128",
+    "methodology": "Derived: scalar ALU processes 1 elem/cycle vs vector SIMD 128/cycle; per-instruction overhead identical",
+    "source": "derived_from_vector_microbench"
+  }
 }
