@@ -1,0 +1,353 @@
+{
+  "schema_version": "1.0",
+  "cases": [
+    {
+      "test_name": "test_operator_aware_ideal_performance_uses_precision_breakdown",
+      "function_under_test": "compute_realized_utilization",
+      "component_metrics": {
+        "cube": {
+          "A": 103.78229723574266,
+          "I": 167.3908019931341,
+          "R": 0.7999999999999916,
+          "U": 0.6199999999999971,
+          "E": 0.7750000000000045,
+          "dominant_item": "fp16",
+          "dominant_share": 0.49768191896795,
+          "warnings": []
+        }
+      },
+      "analysis_result": {
+        "kernel_name": "mixed_cube",
+        "elapsed_time_us": 23.900993387779,
+        "t_core_floor_us": 14.818615900423,
+        "binding_component": "cube",
+        "warnings": []
+      }
+    },
+    {
+      "test_name": "test_component_metrics_match_hand_calculation_for_compute_and_mte",
+      "function_under_test": "compute_realized_utilization",
+      "component_metrics": {
+        "cube": {
+          "A": 35.90455553313561,
+          "I": 183.56537353575428,
+          "R": 0.2876403972245342,
+          "U": 0.19559547011268022,
+          "E": 0.6799999999999894,
+          "dominant_item": "fp16",
+          "dominant_share": 0.4494501018329939,
+          "warnings": []
+        },
+        "mte_gm": {
+          "A": 74.89792659726845,
+          "I": 202.42682864126706,
+          "R": 0.49999999999999417,
+          "U": 0.3699999999999982,
+          "E": 0.7400000000000051,
+          "dominant_item": "gm->ub",
+          "dominant_share": 0.6399281418417558,
+          "warnings": []
+        }
+      },
+      "analysis_result": {
+        "kernel_name": "numeric_check",
+        "elapsed_time_us": 85.469655714521,
+        "t_core_floor_us": 31.623772614373,
+        "binding_component": "mte_gm",
+        "warnings": []
+      }
+    },
+    {
+      "test_name": "test_compute_bound_when_compute_utilization_reaches_threshold",
+      "function_under_test": "analyze_operator_bottleneck",
+      "component_metrics": {
+        "cube": {
+          "A": 176.8801021946954,
+          "I": 213.10855686107857,
+          "R": 0.9021739130435031,
+          "U": 0.830000000000001,
+          "E": 0.9199999999999757,
+          "dominant_item": "fp16",
+          "dominant_share": 0.5184073313319639,
+          "warnings": []
+        },
+        "mte_gm": {
+          "A": 295.8388879415308,
+          "I": 910.0192754062749,
+          "R": 0.4063634913247453,
+          "U": 0.3250907930598004,
+          "E": 0.8000000000000101,
+          "dominant_item": "gm->ub",
+          "dominant_share": 0.7331727362902083,
+          "warnings": []
+        }
+      },
+      "analysis_result": {
+        "kernel_name": "compute_bound",
+        "elapsed_time_us": 17.890649998137,
+        "diagnosis": "Compute Bound",
+        "bound_kind": "Compute Bound",
+        "dominant_component": "cube",
+        "dominant_item": "fp16",
+        "dominant_share": 0.5184073313319639,
+        "warnings": []
+      }
+    },
+    {
+      "test_name": "test_mte_bound_when_mte_utilization_reaches_threshold",
+      "function_under_test": "analyze_operator_bottleneck",
+      "component_metrics": {
+        "cube": {
+          "A": 19.509178969193094,
+          "I": 150.69507315433188,
+          "R": 0.17034380614153186,
+          "U": 0.12946129266756512,
+          "E": 0.7600000000000053,
+          "dominant_item": "fp16",
+          "dominant_share": 0.5024570024570024,
+          "warnings": []
+        },
+        "mte_gm": {
+          "A": 150.58018381774738,
+          "I": 183.6343705094467,
+          "R": 0.8723404255319193,
+          "U": 0.8200000000000058,
+          "E": 0.940000000000002,
+          "dominant_item": "gm->ub",
+          "dominant_share": 0.5517921945629337,
+          "warnings": []
+        }
+      },
+      "analysis_result": {
+        "kernel_name": "mte_bound",
+        "elapsed_time_us": 52.154936996925,
+        "diagnosis": "MTE Bound",
+        "bound_kind": "MTE Bound",
+        "dominant_component": "mte_gm",
+        "dominant_item": "gm->ub",
+        "dominant_share": 0.5517921945629337,
+        "warnings": []
+      }
+    },
+    {
+      "test_name": "test_insufficient_parallelism_when_all_active_ratios_are_low",
+      "function_under_test": "analyze_operator_bottleneck",
+      "component_metrics": {
+        "cube": {
+          "A": 14.000924828186292,
+          "I": 208.66430315924356,
+          "R": 0.30000000000000343,
+          "U": 0.06709784383916109,
+          "E": 0.22365947946386774,
+          "dominant_item": "fp16",
+          "dominant_share": 0.5654305853509041,
+          "warnings": []
+        },
+        "mte_gm": {
+          "A": 40.535316227973,
+          "I": 184.25143739987766,
+          "R": 0.40000000000000174,
+          "U": 0.21999999999999953,
+          "E": 0.5499999999999964,
+          "dominant_item": "gm->ub",
+          "dominant_share": 0.6034720016936593,
+          "warnings": []
+        }
+      },
+      "analysis_result": {
+        "kernel_name": "low_parallelism",
+        "elapsed_time_us": 116.528016543272,
+        "diagnosis": "Insufficient Parallelism",
+        "bound_kind": null,
+        "dominant_component": "mte_gm",
+        "dominant_item": "gm->ub",
+        "dominant_share": 0.6034720016936593,
+        "warnings": []
+      }
+    },
+    {
+      "test_name": "test_inefficient_compute_when_compute_has_high_r_and_low_e",
+      "function_under_test": "analyze_operator_bottleneck",
+      "component_metrics": {
+        "vector": {
+          "A": 29.365578615308927,
+          "I": 122.35657756378639,
+          "R": 0.7800000000000046,
+          "U": 0.24000000000000157,
+          "E": 0.3076923076923079,
+          "dominant_item": "fp32",
+          "dominant_share": 0.44481605351170567,
+          "warnings": []
+        },
+        "mte_gm": {
+          "A": 29.557539679531832,
+          "I": 169.73027166607693,
+          "R": 0.2721002876854471,
+          "U": 0.17414418411868562,
+          "E": 0.6399999999999981,
+          "dominant_item": "gm->ub",
+          "dominant_share": 0.6654583899713035,
+          "warnings": []
+        }
+      },
+      "analysis_result": {
+        "kernel_name": "inefficient_compute",
+        "elapsed_time_us": 56.000939792233,
+        "diagnosis": "Inefficient Compute",
+        "bound_kind": null,
+        "dominant_component": "vector",
+        "dominant_item": "fp32",
+        "dominant_share": 0.44481605351170567,
+        "warnings": []
+      }
+    },
+    {
+      "test_name": "test_inefficient_mte_when_mte_has_high_r_and_low_e",
+      "function_under_test": "analyze_operator_bottleneck",
+      "component_metrics": {
+        "cube": {
+          "A": 6.946767854839491,
+          "I": 188.72791702417118,
+          "R": 0.0634627147137173,
+          "U": 0.036808374533958264,
+          "E": 0.5800000000000352,
+          "dominant_item": "fp16",
+          "dominant_share": 0.4650491045638359,
+          "warnings": []
+        },
+        "mte_ub": {
+          "A": 34.139892629185184,
+          "I": 136.55957051674028,
+          "R": 0.8000000000000016,
+          "U": 0.25000000000000083,
+          "E": 0.3125000000000004,
+          "dominant_item": "ub->gm",
+          "dominant_share": 0.593511226049136,
+          "warnings": []
+        }
+      },
+      "analysis_result": {
+        "kernel_name": "inefficient_mte",
+        "elapsed_time_us": 124.590315681421,
+        "diagnosis": "Inefficient MTE",
+        "bound_kind": null,
+        "dominant_component": "mte_ub",
+        "dominant_item": "ub->gm",
+        "dominant_share": 0.593511226049136,
+        "warnings": []
+      }
+    },
+    {
+      "test_name": "test_warning_when_work_breakdown_is_missing_and_fallback_is_used",
+      "function_under_test": "compute_realized_utilization",
+      "component_metrics": {
+        "cube": {
+          "A": 80.0,
+          "I": 120.0,
+          "R": 0.8,
+          "U": 0.6666666666666666,
+          "E": 0.8333333333333333,
+          "dominant_item": null,
+          "dominant_share": 0.0,
+          "warnings": [
+            "未提供 operator-aware work_breakdown，已回退到 component_bound 的 I_c"
+          ]
+        }
+      },
+      "analysis_result": {
+        "kernel_name": "missing_breakdown",
+        "elapsed_time_us": 15.0,
+        "t_core_floor_us": 10.0,
+        "binding_component": "cube",
+        "warnings": [
+          "cube: 未提供 operator-aware work_breakdown，已回退到 component_bound 的 I_c"
+        ]
+      }
+    },
+    {
+      "test_name": "test_warning_when_active_time_is_larger_than_elapsed_time",
+      "function_under_test": "compute_realized_utilization",
+      "component_metrics": {
+        "cube": {
+          "A": 50.0,
+          "I": 100.0,
+          "R": 1.125,
+          "U": 0.5,
+          "E": 0.4444444444444444,
+          "dominant_item": "fp16",
+          "dominant_share": 1.0,
+          "warnings": [
+            "active_time_us 大于 elapsed_time_us",
+            "R > 1.05；active_time 和 elapsed_time 的统计口径可能不同"
+          ]
+        }
+      },
+      "analysis_result": {
+        "kernel_name": "bad_active_time",
+        "elapsed_time_us": 10.0,
+        "t_core_floor_us": 5.0,
+        "binding_component": "cube",
+        "warnings": [
+          "cube: active_time_us 大于 elapsed_time_us",
+          "cube: R > 1.05；active_time 和 elapsed_time 的统计口径可能不同"
+        ]
+      }
+    },
+    {
+      "test_name": "test_warning_when_profile_work_mismatches_component_bound_work",
+      "function_under_test": "compute_realized_utilization",
+      "component_metrics": {
+        "cube": {
+          "A": 62.5,
+          "I": 100.0,
+          "R": 0.75,
+          "U": 0.625,
+          "E": 0.8333333333333334,
+          "dominant_item": "fp16",
+          "dominant_share": 1.0,
+          "warnings": [
+            "profiling work 和理论 bound work 相差 25.0%"
+          ]
+        }
+      },
+      "analysis_result": {
+        "kernel_name": "work_mismatch",
+        "elapsed_time_us": 20.0,
+        "t_core_floor_us": 10.0,
+        "binding_component": "cube",
+        "warnings": [
+          "cube: profiling work 和理论 bound work 相差 25.0%"
+        ]
+      }
+    },
+    {
+      "test_name": "test_warning_when_u_or_e_is_unphysical",
+      "function_under_test": "compute_realized_utilization",
+      "component_metrics": {
+        "cube": {
+          "A": 125.0,
+          "I": 100.0,
+          "R": 0.5,
+          "U": 1.25,
+          "E": 2.5,
+          "dominant_item": "fp16",
+          "dominant_share": 1.0,
+          "warnings": [
+            "E > 1.05；请检查单位、profiling 统计或校准值",
+            "U > 1.05；请检查 A/I 的单位或 ideal performance 来源"
+          ]
+        }
+      },
+      "analysis_result": {
+        "kernel_name": "unphysical_efficiency",
+        "elapsed_time_us": 8.0,
+        "t_core_floor_us": 10.0,
+        "binding_component": "cube",
+        "warnings": [
+          "cube: E > 1.05；请检查单位、profiling 统计或校准值",
+          "cube: U > 1.05；请检查 A/I 的单位或 ideal performance 来源"
+        ]
+      }
+    }
+  ]
+}

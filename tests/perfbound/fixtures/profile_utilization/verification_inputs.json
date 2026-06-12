@@ -1,0 +1,633 @@
+{
+  "schema_version": "1.0",
+  "purpose": "input_only_cases_for_profile_utilization_verification",
+  "source_test_file": "tests/perfbound/test_profile_utilization.py",
+  "cases": [
+    {
+      "test_name": "test_operator_aware_ideal_performance_uses_precision_breakdown",
+      "description": "验证混合精度 Compute 的 I 按加权调和平均计算，并找出主导精度。",
+      "function_under_test": "compute_realized_utilization",
+      "inputs": {
+        "profile": {
+          "kernel_name": "mixed_cube",
+          "elapsed_time_us": 23.900993387779,
+          "components": [
+            {
+              "component": "cube",
+              "work_done": 2480.5,
+              "active_time_us": 19.120794710223,
+              "work_breakdown": [
+                {
+                  "label": "fp16",
+                  "work": 1234.5,
+                  "peak_rate": 157.25
+                },
+                {
+                  "label": "bf16",
+                  "work": 789.25,
+                  "peak_rate": 143.5
+                },
+                {
+                  "label": "int8",
+                  "work": 456.75,
+                  "peak_rate": 311.125
+                }
+              ]
+            }
+          ]
+        },
+        "component_bound": {
+          "t_core_floor_us": 14.818615900423,
+          "binding_component": "cube",
+          "total_ops": {
+            "cube": 2480.5
+          },
+          "total_bytes": {},
+          "per_component_us": {
+            "cube": 14.818615900423
+          }
+        },
+        "work_tolerance": 0.1
+      }
+    },
+    {
+      "test_name": "test_component_metrics_match_hand_calculation_for_compute_and_mte",
+      "description": "同时验证 Compute 和 MTE component 的 A/I/E/R/U 数值。",
+      "function_under_test": "compute_realized_utilization",
+      "inputs": {
+        "profile": {
+          "kernel_name": "numeric_check",
+          "elapsed_time_us": 85.469655714521,
+          "components": [
+            {
+              "component": "cube",
+              "work_done": 3068.75,
+              "active_time_us": 24.584525720369,
+              "work_breakdown": [
+                {
+                  "label": "fp16",
+                  "work": 1379.25,
+                  "peak_rate": 211.5
+                },
+                {
+                  "label": "bf16",
+                  "work": 842.75,
+                  "peak_rate": 188.25
+                },
+                {
+                  "label": "fp32",
+                  "work": 317.5,
+                  "peak_rate": 72.125
+                },
+                {
+                  "label": "int8",
+                  "work": 529.25,
+                  "peak_rate": 401.75
+                }
+              ]
+            },
+            {
+              "component": "mte_gm",
+              "work_done": 6401.5,
+              "active_time_us": 42.73482785726,
+              "work_breakdown": [
+                {
+                  "label": "gm->ub",
+                  "work": 4096.5,
+                  "peak_rate": 236.75
+                },
+                {
+                  "label": "gm->l1",
+                  "work": 1536.25,
+                  "peak_rate": 184.5
+                },
+                {
+                  "label": "l1->ub",
+                  "work": 768.75,
+                  "peak_rate": 128.25
+                }
+              ]
+            }
+          ]
+        },
+        "component_bound": {
+          "t_core_floor_us": 31.623772614373,
+          "binding_component": "mte_gm",
+          "total_ops": {
+            "cube": 3068.75
+          },
+          "total_bytes": {
+            "mte_gm": 6401.5
+          },
+          "per_component_us": {
+            "cube": 16.717477489851,
+            "mte_gm": 31.623772614373
+          }
+        },
+        "work_tolerance": 0.1
+      }
+    },
+    {
+      "test_name": "test_compute_bound_when_compute_utilization_reaches_threshold",
+      "description": "Cube 的 U 达到阈值，最终诊断为 Compute Bound。",
+      "function_under_test": "analyze_operator_bottleneck",
+      "inputs": {
+        "profile": {
+          "kernel_name": "compute_bound",
+          "elapsed_time_us": 17.890649998137,
+          "components": [
+            {
+              "component": "cube",
+              "work_done": 3164.5,
+              "active_time_us": 16.140477715711,
+              "work_breakdown": [
+                {
+                  "label": "fp16",
+                  "work": 1640.5,
+                  "peak_rate": 202.25
+                },
+                {
+                  "label": "bf16",
+                  "work": 915.25,
+                  "peak_rate": 176.5
+                },
+                {
+                  "label": "int8",
+                  "work": 608.75,
+                  "peak_rate": 392.125
+                }
+              ]
+            },
+            {
+              "component": "mte_gm",
+              "work_done": 5292.75,
+              "active_time_us": 7.270106995312,
+              "work_breakdown": [
+                {
+                  "label": "gm->ub",
+                  "work": 3880.5,
+                  "peak_rate": 980.0
+                },
+                {
+                  "label": "gm->l1",
+                  "work": 1412.25,
+                  "peak_rate": 760.75
+                }
+              ]
+            }
+          ]
+        },
+        "component_bound": {
+          "t_core_floor_us": 14.849239498454,
+          "binding_component": "cube",
+          "total_ops": {
+            "cube": 3164.5
+          },
+          "total_bytes": {
+            "mte_gm": 5292.75
+          },
+          "per_component_us": {
+            "cube": 14.849239498454,
+            "mte_gm": 5.81608559625
+          }
+        },
+        "u_threshold": 0.8,
+        "r_threshold": 0.5,
+        "work_tolerance": 0.1
+      }
+    },
+    {
+      "test_name": "test_mte_bound_when_mte_utilization_reaches_threshold",
+      "description": "MTE-GM 的 U 达到阈值，最终诊断为 MTE Bound。",
+      "function_under_test": "analyze_operator_bottleneck",
+      "inputs": {
+        "profile": {
+          "kernel_name": "mte_bound",
+          "elapsed_time_us": 52.154936996925,
+          "components": [
+            {
+              "component": "cube",
+              "work_done": 1017.5,
+              "active_time_us": 8.884270477128,
+              "work_breakdown": [
+                {
+                  "label": "fp16",
+                  "work": 511.25,
+                  "peak_rate": 196.0
+                },
+                {
+                  "label": "bf16",
+                  "work": 377.5,
+                  "peak_rate": 162.0
+                },
+                {
+                  "label": "fp32",
+                  "work": 128.75,
+                  "peak_rate": 71.0
+                }
+              ]
+            },
+            {
+              "component": "mte_gm",
+              "work_done": 7853.5,
+              "active_time_us": 45.496859933488,
+              "work_breakdown": [
+                {
+                  "label": "gm->ub",
+                  "work": 4333.5,
+                  "peak_rate": 224.25
+                },
+                {
+                  "label": "gm->l1",
+                  "work": 2331.25,
+                  "peak_rate": 172.75
+                },
+                {
+                  "label": "ub->gm",
+                  "work": 1188.75,
+                  "peak_rate": 119.5
+                }
+              ]
+            }
+          ]
+        },
+        "component_bound": {
+          "t_core_floor_us": 42.767048337479,
+          "binding_component": "mte_gm",
+          "total_ops": {
+            "cube": 1017.5
+          },
+          "total_bytes": {
+            "mte_gm": 7853.5
+          },
+          "per_component_us": {
+            "cube": 6.752045562617,
+            "mte_gm": 42.767048337479
+          }
+        },
+        "u_threshold": 0.8,
+        "r_threshold": 0.5,
+        "work_tolerance": 0.1
+      }
+    },
+    {
+      "test_name": "test_insufficient_parallelism_when_all_active_ratios_are_low",
+      "description": "所有有效 component 的 R 都低于阈值，最终诊断为 Insufficient Parallelism。",
+      "function_under_test": "analyze_operator_bottleneck",
+      "inputs": {
+        "profile": {
+          "kernel_name": "low_parallelism",
+          "elapsed_time_us": 116.528016543272,
+          "components": [
+            {
+              "component": "cube",
+              "work_done": 1631.5,
+              "active_time_us": 34.958404962982,
+              "work_breakdown": [
+                {
+                  "label": "fp16",
+                  "work": 922.5,
+                  "peak_rate": 201.5
+                },
+                {
+                  "label": "bf16",
+                  "work": 431.25,
+                  "peak_rate": 171.25
+                },
+                {
+                  "label": "int8",
+                  "work": 277.75,
+                  "peak_rate": 384.5
+                }
+              ]
+            },
+            {
+              "component": "mte_gm",
+              "work_done": 4723.5,
+              "active_time_us": 46.611206617309,
+              "work_breakdown": [
+                {
+                  "label": "gm->ub",
+                  "work": 2850.5,
+                  "peak_rate": 226.25
+                },
+                {
+                  "label": "gm->l1",
+                  "work": 1164.25,
+                  "peak_rate": 166.5
+                },
+                {
+                  "label": "ub->gm",
+                  "work": 708.75,
+                  "peak_rate": 117.25
+                }
+              ]
+            }
+          ]
+        },
+        "component_bound": {
+          "t_core_floor_us": 25.63616363952,
+          "binding_component": "mte_gm",
+          "total_ops": {
+            "cube": 1631.5
+          },
+          "total_bytes": {
+            "mte_gm": 4723.5
+          },
+          "per_component_us": {
+            "cube": 7.818778656908,
+            "mte_gm": 25.63616363952
+          }
+        },
+        "u_threshold": 0.8,
+        "r_threshold": 0.5,
+        "work_tolerance": 0.1
+      }
+    },
+    {
+      "test_name": "test_inefficient_compute_when_compute_has_high_r_and_low_e",
+      "description": "Vector 的 R 高但 E 低，最终诊断为 Inefficient Compute。",
+      "function_under_test": "analyze_operator_bottleneck",
+      "inputs": {
+        "profile": {
+          "kernel_name": "inefficient_compute",
+          "elapsed_time_us": 56.000939792233,
+          "components": [
+            {
+              "component": "vector",
+              "work_done": 1644.5,
+              "active_time_us": 43.680733037942,
+              "work_breakdown": [
+                {
+                  "label": "fp32",
+                  "work": 731.5,
+                  "peak_rate": 82.75
+                },
+                {
+                  "label": "fp16",
+                  "work": 618.25,
+                  "peak_rate": 166.5
+                },
+                {
+                  "label": "int8",
+                  "work": 294.75,
+                  "peak_rate": 332.25
+                }
+              ]
+            },
+            {
+              "component": "mte_gm",
+              "work_done": 1655.25,
+              "active_time_us": 15.237871828122,
+              "work_breakdown": [
+                {
+                  "label": "gm->ub",
+                  "work": 1101.5,
+                  "peak_rate": 221.25
+                },
+                {
+                  "label": "ub->gm",
+                  "work": 553.75,
+                  "peak_rate": 116.0
+                }
+              ]
+            }
+          ]
+        },
+        "component_bound": {
+          "t_core_floor_us": 13.440225550136,
+          "binding_component": "vector",
+          "total_ops": {
+            "vector": 1644.5
+          },
+          "total_bytes": {
+            "mte_gm": 1655.25
+          },
+          "per_component_us": {
+            "vector": 13.440225550136,
+            "mte_gm": 9.752237969998
+          }
+        },
+        "u_threshold": 0.8,
+        "r_threshold": 0.5,
+        "work_tolerance": 0.1
+      }
+    },
+    {
+      "test_name": "test_inefficient_mte_when_mte_has_high_r_and_low_e",
+      "description": "MTE-UB 的 R 高但 E 低，最终诊断为 Inefficient MTE。",
+      "function_under_test": "analyze_operator_bottleneck",
+      "inputs": {
+        "profile": {
+          "kernel_name": "inefficient_mte",
+          "elapsed_time_us": 124.590315681421,
+          "components": [
+            {
+              "component": "cube",
+              "work_done": 865.5,
+              "active_time_us": 7.906839660182,
+              "work_breakdown": [
+                {
+                  "label": "fp16",
+                  "work": 402.5,
+                  "peak_rate": 188.5
+                },
+                {
+                  "label": "bf16",
+                  "work": 318.25,
+                  "peak_rate": 154.75
+                },
+                {
+                  "label": "int8",
+                  "work": 144.75,
+                  "peak_rate": 367.25
+                }
+              ]
+            },
+            {
+              "component": "mte_ub",
+              "work_done": 4253.5,
+              "active_time_us": 99.672252545137,
+              "work_breakdown": [
+                {
+                  "label": "ub->gm",
+                  "work": 2524.5,
+                  "peak_rate": 118.75
+                },
+                {
+                  "label": "gm->ub",
+                  "work": 1046.25,
+                  "peak_rate": 214.5
+                },
+                {
+                  "label": "l1->ub",
+                  "work": 682.75,
+                  "peak_rate": 136.25
+                }
+              ]
+            }
+          ]
+        },
+        "component_bound": {
+          "t_core_floor_us": 31.147578920355,
+          "binding_component": "mte_ub",
+          "total_ops": {
+            "cube": 865.5
+          },
+          "total_bytes": {
+            "mte_ub": 4253.5
+          },
+          "per_component_us": {
+            "cube": 4.585967002906,
+            "mte_ub": 31.147578920355
+          }
+        },
+        "u_threshold": 0.8,
+        "r_threshold": 0.5,
+        "work_tolerance": 0.1
+      }
+    },
+    {
+      "test_name": "test_warning_when_work_breakdown_is_missing_and_fallback_is_used",
+      "description": "没有 work_breakdown 时，I 回退到 ComponentBound，并产生 fallback warning。",
+      "function_under_test": "compute_realized_utilization",
+      "inputs": {
+        "profile": {
+          "kernel_name": "missing_breakdown",
+          "elapsed_time_us": 15.0,
+          "components": [
+            {
+              "component": "cube",
+              "work_done": 1200.0,
+              "active_time_us": 12.0,
+              "work_breakdown": []
+            }
+          ]
+        },
+        "component_bound": {
+          "t_core_floor_us": 10.0,
+          "binding_component": "cube",
+          "total_ops": {
+            "cube": 1200.0
+          },
+          "total_bytes": {},
+          "per_component_us": {
+            "cube": 10.0
+          }
+        },
+        "work_tolerance": 0.1
+      }
+    },
+    {
+      "test_name": "test_warning_when_active_time_is_larger_than_elapsed_time",
+      "description": "active_time_us 大于 elapsed_time_us 时产生 warning。",
+      "function_under_test": "compute_realized_utilization",
+      "inputs": {
+        "profile": {
+          "kernel_name": "bad_active_time",
+          "elapsed_time_us": 10.0,
+          "components": [
+            {
+              "component": "cube",
+              "work_done": 500.0,
+              "active_time_us": 11.25,
+              "work_breakdown": [
+                {
+                  "label": "fp16",
+                  "work": 500.0,
+                  "peak_rate": 100.0
+                }
+              ]
+            }
+          ]
+        },
+        "component_bound": {
+          "t_core_floor_us": 5.0,
+          "binding_component": "cube",
+          "total_ops": {
+            "cube": 500.0
+          },
+          "total_bytes": {},
+          "per_component_us": {
+            "cube": 5.0
+          }
+        },
+        "work_tolerance": 0.1
+      }
+    },
+    {
+      "test_name": "test_warning_when_profile_work_mismatches_component_bound_work",
+      "description": "profiling work 和 ComponentBound work 差距超过容差时产生 warning。",
+      "function_under_test": "compute_realized_utilization",
+      "inputs": {
+        "profile": {
+          "kernel_name": "work_mismatch",
+          "elapsed_time_us": 20.0,
+          "components": [
+            {
+              "component": "cube",
+              "work_done": 1250.0,
+              "active_time_us": 15.0,
+              "work_breakdown": [
+                {
+                  "label": "fp16",
+                  "work": 1250.0,
+                  "peak_rate": 100.0
+                }
+              ]
+            }
+          ]
+        },
+        "component_bound": {
+          "t_core_floor_us": 10.0,
+          "binding_component": "cube",
+          "total_ops": {
+            "cube": 1000.0
+          },
+          "total_bytes": {},
+          "per_component_us": {
+            "cube": 10.0
+          }
+        },
+        "work_tolerance": 0.1
+      }
+    },
+    {
+      "test_name": "test_warning_when_u_or_e_is_unphysical",
+      "description": "U 或 E 超过合理范围时产生 warning。",
+      "function_under_test": "compute_realized_utilization",
+      "inputs": {
+        "profile": {
+          "kernel_name": "unphysical_efficiency",
+          "elapsed_time_us": 8.0,
+          "components": [
+            {
+              "component": "cube",
+              "work_done": 1000.0,
+              "active_time_us": 4.0,
+              "work_breakdown": [
+                {
+                  "label": "fp16",
+                  "work": 1000.0,
+                  "peak_rate": 100.0
+                }
+              ]
+            }
+          ]
+        },
+        "component_bound": {
+          "t_core_floor_us": 10.0,
+          "binding_component": "cube",
+          "total_ops": {
+            "cube": 1000.0
+          },
+          "total_bytes": {},
+          "per_component_us": {
+            "cube": 10.0
+          }
+        },
+        "work_tolerance": 0.1
+      }
+    }
+  ]
+}
