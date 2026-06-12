@@ -41,6 +41,10 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tritonsim-opt/tritonsim-opt.cpp")
     target_link_libraries(tritonsim-opt PRIVATE ${TRITON_DIALECT_LIB})
   endif()
 
+  if(TRITONSIM_HAS_BISHENGIR_HIVM)
+    target_link_libraries(tritonsim-opt PRIVATE ${TRITONSIM_BISHENGIR_HIVM_LIBS})
+  endif()
+
   mlir_check_all_link_libraries(tritonsim-opt)
   list(APPEND _installed_tools tritonsim-opt)
 endif()
