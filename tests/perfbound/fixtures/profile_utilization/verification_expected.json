@@ -1,0 +1,373 @@
+{
+  "schema_version": "1.0",
+  "purpose": "expected_answers_for_profile_utilization_verification",
+  "source_input_file": "tests/perfbound/fixtures/profile_utilization/verification_inputs.json",
+  "metric_formulas": {
+    "A_actual_performance": "work_done / elapsed_time_us",
+    "I_ideal_performance": "sum(work_i) / sum(work_i / peak_rate_i), or bound_work / per_component_us when work_breakdown is empty",
+    "E_execution_efficiency": "U_utilization / R_active_time_ratio",
+    "R_active_time_ratio": "active_time_us / elapsed_time_us",
+    "U_utilization": "A_actual_performance / I_ideal_performance"
+  },
+  "cases": [
+    {
+      "test_name": "test_operator_aware_ideal_performance_uses_precision_breakdown",
+      "description": "验证混合精度 Compute 的 I 按加权调和平均计算，并找出主导精度。",
+      "function_under_test": "compute_realized_utilization",
+      "component_metrics": {
+        "cube": {
+          "A": 103.782297235743,
+          "I": 167.390801993134,
+          "E": 0.775,
+          "R": 0.8,
+          "U": 0.62,
+          "dominant_item": "fp16",
+          "dominant_share": 0.497681918968,
+          "warnings": []
+        }
+      },
+      "expected_output": {
+        "kernel_name": "mixed_cube",
+        "elapsed_time_us": 23.900993387779,
+        "warnings": [],
+        "t_core_floor_us": 14.818615900423,
+        "binding_component": "cube"
+      }
+    },
+    {
+      "test_name": "test_component_metrics_match_hand_calculation_for_compute_and_mte",
+      "description": "同时验证 Compute 和 MTE component 的 A/I/E/R/U 数值。",
+      "function_under_test": "compute_realized_utilization",
+      "component_metrics": {
+        "cube": {
+          "A": 35.904555533136,
+          "I": 183.565373535754,
+          "E": 0.68,
+          "R": 0.287640397225,
+          "U": 0.195595470113,
+          "dominant_item": "fp16",
+          "dominant_share": 0.449450101833,
+          "warnings": []
+        },
+        "mte_gm": {
+          "A": 74.897926597269,
+          "I": 202.426828641267,
+          "E": 0.74,
+          "R": 0.5,
+          "U": 0.37,
+          "dominant_item": "gm->ub",
+          "dominant_share": 0.639928141842,
+          "warnings": []
+        }
+      },
+      "expected_output": {
+        "kernel_name": "numeric_check",
+        "elapsed_time_us": 85.469655714521,
+        "warnings": [],
+        "t_core_floor_us": 31.623772614373,
+        "binding_component": "mte_gm"
+      }
+    },
+    {
+      "test_name": "test_compute_bound_when_compute_utilization_reaches_threshold",
+      "description": "Cube 的 U 达到阈值，最终诊断为 Compute Bound。",
+      "function_under_test": "analyze_operator_bottleneck",
+      "component_metrics": {
+        "cube": {
+          "A": 176.880102194695,
+          "I": 213.108556861079,
+          "E": 0.92,
+          "R": 0.902173913043,
+          "U": 0.83,
+          "dominant_item": "fp16",
+          "dominant_share": 0.518407331332,
+          "warnings": []
+        },
+        "mte_gm": {
+          "A": 295.83888794153,
+          "I": 910.019275406275,
+          "E": 0.8,
+          "R": 0.406363491325,
+          "U": 0.32509079306,
+          "dominant_item": "gm->ub",
+          "dominant_share": 0.73317273629,
+          "warnings": []
+        }
+      },
+      "expected_output": {
+        "kernel_name": "compute_bound",
+        "elapsed_time_us": 17.890649998137,
+        "warnings": [],
+        "diagnosis": "Compute Bound",
+        "bound_kind": "Compute Bound",
+        "dominant_component": "cube",
+        "dominant_item": "fp16",
+        "dominant_share": 0.518407331332
+      }
+    },
+    {
+      "test_name": "test_mte_bound_when_mte_utilization_reaches_threshold",
+      "description": "MTE-GM 的 U 达到阈值，最终诊断为 MTE Bound。",
+      "function_under_test": "analyze_operator_bottleneck",
+      "component_metrics": {
+        "cube": {
+          "A": 19.509178969193,
+          "I": 150.695073154332,
+          "E": 0.76,
+          "R": 0.170343806142,
+          "U": 0.129461292668,
+          "dominant_item": "fp16",
+          "dominant_share": 0.502457002457,
+          "warnings": []
+        },
+        "mte_gm": {
+          "A": 150.580183817746,
+          "I": 183.634370509447,
+          "E": 0.94,
+          "R": 0.872340425532,
+          "U": 0.82,
+          "dominant_item": "gm->ub",
+          "dominant_share": 0.551792194563,
+          "warnings": []
+        }
+      },
+      "expected_output": {
+        "kernel_name": "mte_bound",
+        "elapsed_time_us": 52.154936996925,
+        "warnings": [],
+        "diagnosis": "MTE Bound",
+        "bound_kind": "MTE Bound",
+        "dominant_component": "mte_gm",
+        "dominant_item": "gm->ub",
+        "dominant_share": 0.551792194563
+      }
+    },
+    {
+      "test_name": "test_insufficient_parallelism_when_all_active_ratios_are_low",
+      "description": "所有有效 component 的 R 都低于阈值，最终诊断为 Insufficient Parallelism。",
+      "function_under_test": "analyze_operator_bottleneck",
+      "component_metrics": {
+        "cube": {
+          "A": 14.000924828186,
+          "I": 208.664303159244,
+          "E": 0.223659479464,
+          "R": 0.3,
+          "U": 0.067097843839,
+          "dominant_item": "fp16",
+          "dominant_share": 0.565430585351,
+          "warnings": []
+        },
+        "mte_gm": {
+          "A": 40.535316227973,
+          "I": 184.251437399878,
+          "E": 0.55,
+          "R": 0.4,
+          "U": 0.22,
+          "dominant_item": "gm->ub",
+          "dominant_share": 0.603472001694,
+          "warnings": []
+        }
+      },
+      "expected_output": {
+        "kernel_name": "low_parallelism",
+        "elapsed_time_us": 116.528016543272,
+        "warnings": [],
+        "diagnosis": "Insufficient Parallelism",
+        "bound_kind": null,
+        "dominant_component": null,
+        "dominant_item": null,
+        "dominant_share": 0.0
+      }
+    },
+    {
+      "test_name": "test_inefficient_compute_when_compute_has_high_r_and_low_e",
+      "description": "Vector 的 R 高但 E 低，最终诊断为 Inefficient Compute。",
+      "function_under_test": "analyze_operator_bottleneck",
+      "component_metrics": {
+        "vector": {
+          "A": 29.365578615309,
+          "I": 122.356577563786,
+          "E": 0.307692307692,
+          "R": 0.78,
+          "U": 0.24,
+          "dominant_item": "fp32",
+          "dominant_share": 0.444816053512,
+          "warnings": []
+        },
+        "mte_gm": {
+          "A": 29.557539679532,
+          "I": 169.730271666077,
+          "E": 0.64,
+          "R": 0.272100287685,
+          "U": 0.174144184119,
+          "dominant_item": "gm->ub",
+          "dominant_share": 0.665458389971,
+          "warnings": []
+        }
+      },
+      "expected_output": {
+        "kernel_name": "inefficient_compute",
+        "elapsed_time_us": 56.000939792233,
+        "warnings": [],
+        "diagnosis": "Inefficient Compute",
+        "bound_kind": null,
+        "dominant_component": "vector",
+        "dominant_item": "fp32",
+        "dominant_share": 0.444816053512
+      }
+    },
+    {
+      "test_name": "test_inefficient_mte_when_mte_has_high_r_and_low_e",
+      "description": "MTE-UB 的 R 高但 E 低，最终诊断为 Inefficient MTE。",
+      "function_under_test": "analyze_operator_bottleneck",
+      "component_metrics": {
+        "cube": {
+          "A": 6.946767854839,
+          "I": 188.727917024171,
+          "E": 0.58,
+          "R": 0.063462714714,
+          "U": 0.036808374534,
+          "dominant_item": "fp16",
+          "dominant_share": 0.465049104564,
+          "warnings": []
+        },
+        "mte_ub": {
+          "A": 34.139892629185,
+          "I": 136.55957051674,
+          "E": 0.3125,
+          "R": 0.8,
+          "U": 0.25,
+          "dominant_item": "ub->gm",
+          "dominant_share": 0.593511226049,
+          "warnings": []
+        }
+      },
+      "expected_output": {
+        "kernel_name": "inefficient_mte",
+        "elapsed_time_us": 124.590315681421,
+        "warnings": [],
+        "diagnosis": "Inefficient MTE",
+        "bound_kind": null,
+        "dominant_component": "mte_ub",
+        "dominant_item": "ub->gm",
+        "dominant_share": 0.593511226049
+      }
+    },
+    {
+      "test_name": "test_warning_when_work_breakdown_is_missing_and_fallback_is_used",
+      "description": "没有 work_breakdown 时，I 回退到 ComponentBound，并产生 fallback warning。",
+      "function_under_test": "compute_realized_utilization",
+      "component_metrics": {
+        "cube": {
+          "A": 80.0,
+          "I": 120.0,
+          "E": 0.833333333333,
+          "R": 0.8,
+          "U": 0.666666666667,
+          "dominant_item": null,
+          "dominant_share": 0.0,
+          "warnings": [
+            "未提供 operator-aware work_breakdown，已回退到 component_bound 的 I_c"
+          ]
+        }
+      },
+      "expected_output": {
+        "kernel_name": "missing_breakdown",
+        "elapsed_time_us": 15.0,
+        "warnings": [
+          "cube: 未提供 operator-aware work_breakdown，已回退到 component_bound 的 I_c"
+        ],
+        "t_core_floor_us": 10.0,
+        "binding_component": "cube"
+      }
+    },
+    {
+      "test_name": "test_warning_when_active_time_is_larger_than_elapsed_time",
+      "description": "active_time_us 大于 elapsed_time_us 时产生 warning。",
+      "function_under_test": "compute_realized_utilization",
+      "component_metrics": {
+        "cube": {
+          "A": 50.0,
+          "I": 100.0,
+          "E": 0.444444444444,
+          "R": 1.125,
+          "U": 0.5,
+          "dominant_item": "fp16",
+          "dominant_share": 1.0,
+          "warnings": [
+            "active_time_us 大于 elapsed_time_us",
+            "R > 1.05；active_time 和 elapsed_time 的统计口径可能不同"
+          ]
+        }
+      },
+      "expected_output": {
+        "kernel_name": "bad_active_time",
+        "elapsed_time_us": 10.0,
+        "warnings": [
+          "cube: active_time_us 大于 elapsed_time_us",
+          "cube: R > 1.05；active_time 和 elapsed_time 的统计口径可能不同"
+        ],
+        "t_core_floor_us": 5.0,
+        "binding_component": "cube"
+      }
+    },
+    {
+      "test_name": "test_warning_when_profile_work_mismatches_component_bound_work",
+      "description": "profiling work 和 ComponentBound work 差距超过容差时产生 warning。",
+      "function_under_test": "compute_realized_utilization",
+      "component_metrics": {
+        "cube": {
+          "A": 62.5,
+          "I": 100.0,
+          "E": 0.833333333333,
+          "R": 0.75,
+          "U": 0.625,
+          "dominant_item": "fp16",
+          "dominant_share": 1.0,
+          "warnings": [
+            "profiling work 和理论 bound work 相差 25.0%"
+          ]
+        }
+      },
+      "expected_output": {
+        "kernel_name": "work_mismatch",
+        "elapsed_time_us": 20.0,
+        "warnings": [
+          "cube: profiling work 和理论 bound work 相差 25.0%"
+        ],
+        "t_core_floor_us": 10.0,
+        "binding_component": "cube"
+      }
+    },
+    {
+      "test_name": "test_warning_when_u_or_e_is_unphysical",
+      "description": "U 或 E 超过合理范围时产生 warning。",
+      "function_under_test": "compute_realized_utilization",
+      "component_metrics": {
+        "cube": {
+          "A": 125.0,
+          "I": 100.0,
+          "E": 2.5,
+          "R": 0.5,
+          "U": 1.25,
+          "dominant_item": "fp16",
+          "dominant_share": 1.0,
+          "warnings": [
+            "E > 1.05；请检查单位、profiling 统计或校准值",
+            "U > 1.05；请检查 A/I 的单位或 ideal performance 来源"
+          ]
+        }
+      },
+      "expected_output": {
+        "kernel_name": "unphysical_efficiency",
+        "elapsed_time_us": 8.0,
+        "warnings": [
+          "cube: E > 1.05；请检查单位、profiling 统计或校准值",
+          "cube: U > 1.05；请检查 A/I 的单位或 ideal performance 来源"
+        ],
+        "t_core_floor_us": 10.0,
+        "binding_component": "cube"
+      }
+    }
+  ]
+}

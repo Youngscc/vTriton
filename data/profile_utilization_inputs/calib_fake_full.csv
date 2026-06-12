@@ -1,0 +1,10 @@
+src_mem,dst_mem,core_num,pkt_size,mode,bandwidth(GB/s)
+gm,ub,-1,-1,fake_sustained,90.0
+ub,gm,-1,-1,fake_sustained,88.0
+gm,l1,-1,-1,fake_sustained,145.0
+l1,l0a,-1,-1,fake_sustained,460.0
+l1,l0b,-1,-1,fake_sustained,460.0
+l0c,gm,-1,-1,fake_sustained,82.0
+l0c,ub,-1,-1,fake_sustained,300.0
+ub,l1,-1,-1,fake_sustained,120.0
+ub,ub,-1,-1,fake_sustained,600.0

@@ -1,0 +1,390 @@
+{
+  "version": "fake-full-v0",
+  "hardware_name": "Ascend 910B3 FAKE FULL CALIBRATION",
+  "description": "FAKE DATA for plumbing and documentation only. These values are synthetic placeholders, not measured hardware calibration and not datasheet-authoritative peaks.",
+  "core": {
+    "aic_core_num": 20,
+    "aiv_core_num": 40,
+    "cv_bind": true,
+    "clock_freq_ghz": 1.85
+  },
+  "cube": {
+    "throughput": {
+      "fp16": 5.2,
+      "bf16": 5.1,
+      "fp32": 2.6,
+      "int8": 10.4,
+      "int32": 1.3
+    },
+    "fractal_sizes": {
+      "fp16": [16, 16, 16],
+      "bf16": [16, 16, 16],
+      "fp32": [16, 16, 8],
+      "int8": [16, 32, 16],
+      "int32": [16, 16, 8]
+    }
+  },
+  "vector": {
+    "vec_width_elements": 128,
+    "throughput_fp16_tflops": 0.018,
+    "throughput_fp32_tflops": 0.009
+  },
+  "memory": {
+    "gm_size_gb": 32.0,
+    "l2_size_mb": 192.0,
+    "l1_size_kb": 1024.0,
+    "l0a_size_kb": 64.0,
+    "l0b_size_kb": 64.0,
+    "l0c_size_kb": 256.0,
+    "ub_size_kb": 256.0,
+    "bw": {
+      "gm_to_ub": {
+        "src_mem": "gm",
+        "dst_mem": "ub",
+        "bw_gb_per_s": 90.0,
+        "core_num": -1,
+        "pkt_size": -1,
+        "alignment_bytes": 32,
+        "max_burst_bytes": 65536
+      },
+      "ub_to_gm": {
+        "src_mem": "ub",
+        "dst_mem": "gm",
+        "bw_gb_per_s": 88.0,
+        "core_num": -1,
+        "pkt_size": -1,
+        "alignment_bytes": 32,
+        "max_burst_bytes": 65536
+      },
+      "gm_to_l1": {
+        "src_mem": "gm",
+        "dst_mem": "l1",
+        "bw_gb_per_s": 145.0,
+        "core_num": -1,
+        "pkt_size": -1,
+        "alignment_bytes": 32,
+        "max_burst_bytes": 65536
+      },
+      "l1_to_l0a": {
+        "src_mem": "l1",
+        "dst_mem": "l0a",
+        "bw_gb_per_s": 460.0,
+        "core_num": -1,
+        "pkt_size": -1,
+        "alignment_bytes": 32,
+        "max_burst_bytes": 65536
+      },
+      "l1_to_l0b": {
+        "src_mem": "l1",
+        "dst_mem": "l0b",
+        "bw_gb_per_s": 460.0,
+        "core_num": -1,
+        "pkt_size": -1,
+        "alignment_bytes": 32,
+        "max_burst_bytes": 65536
+      },
+      "l0c_to_gm": {
+        "src_mem": "l0c",
+        "dst_mem": "gm",
+        "bw_gb_per_s": 82.0,
+        "core_num": -1,
+        "pkt_size": -1,
+        "alignment_bytes": 32,
+        "max_burst_bytes": 65536
+      },
+      "l0c_to_ub": {
+        "src_mem": "l0c",
+        "dst_mem": "ub",
+        "bw_gb_per_s": 300.0,
+        "core_num": -1,
+        "pkt_size": -1,
+        "alignment_bytes": 32,
+        "max_burst_bytes": 65536
+      },
+      "ub_to_l1": {
+        "src_mem": "ub",
+        "dst_mem": "l1",
+        "bw_gb_per_s": 120.0,
+        "core_num": -1,
+        "pkt_size": -1,
+        "alignment_bytes": 32,
+        "max_burst_bytes": 65536
+      },
+      "ub_to_ub": {
+        "src_mem": "ub",
+        "dst_mem": "ub",
+        "bw_gb_per_s": 600.0,
+        "core_num": -1,
+        "pkt_size": -1,
+        "alignment_bytes": 32,
+        "max_burst_bytes": 65536
+      }
+    }
+  },
+  "constants": {
+    "P_cube_fp16_sustained": {
+      "name": "P_cube_fp16_sustained",
+      "value": 5.2,
+      "unit": "TFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. Synthetic placeholder for format coverage only."
+    },
+    "P_cube_bf16_sustained": {
+      "name": "P_cube_bf16_sustained",
+      "value": 5.1,
+      "unit": "TFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. Synthetic placeholder for format coverage only."
+    },
+    "P_cube_fp32_sustained": {
+      "name": "P_cube_fp32_sustained",
+      "value": 2.6,
+      "unit": "TFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. Synthetic placeholder for format coverage only."
+    },
+    "P_cube_int8_sustained": {
+      "name": "P_cube_int8_sustained",
+      "value": 10.4,
+      "unit": "TFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. Synthetic placeholder for format coverage only."
+    },
+    "P_cube_int32_sustained": {
+      "name": "P_cube_int32_sustained",
+      "value": 1.3,
+      "unit": "TFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. Synthetic placeholder for format coverage only."
+    },
+    "P_vector_add_sustained": {
+      "name": "P_vector_add_sustained",
+      "value": 18.0,
+      "unit": "GFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. FP16-like synthetic vector throughput."
+    },
+    "P_vector_sub_sustained": {
+      "name": "P_vector_sub_sustained",
+      "value": 18.0,
+      "unit": "GFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. FP16-like synthetic vector throughput."
+    },
+    "P_vector_mul_sustained": {
+      "name": "P_vector_mul_sustained",
+      "value": 17.5,
+      "unit": "GFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. FP16-like synthetic vector throughput."
+    },
+    "P_vector_div_sustained": {
+      "name": "P_vector_div_sustained",
+      "value": 6.0,
+      "unit": "GFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. FP16-like synthetic vector throughput."
+    },
+    "P_vector_max_sustained": {
+      "name": "P_vector_max_sustained",
+      "value": 18.5,
+      "unit": "GFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. FP16-like synthetic vector throughput."
+    },
+    "P_vector_min_sustained": {
+      "name": "P_vector_min_sustained",
+      "value": 18.5,
+      "unit": "GFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. FP16-like synthetic vector throughput."
+    },
+    "P_vector_exp_sustained": {
+      "name": "P_vector_exp_sustained",
+      "value": 4.0,
+      "unit": "GFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. FP16-like synthetic vector throughput."
+    },
+    "P_vector_log_sustained": {
+      "name": "P_vector_log_sustained",
+      "value": 4.0,
+      "unit": "GFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. FP16-like synthetic vector throughput."
+    },
+    "P_vector_sqrt_sustained": {
+      "name": "P_vector_sqrt_sustained",
+      "value": 6.0,
+      "unit": "GFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. FP16-like synthetic vector throughput."
+    },
+    "P_vector_rsqrt_sustained": {
+      "name": "P_vector_rsqrt_sustained",
+      "value": 6.0,
+      "unit": "GFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. FP16-like synthetic vector throughput."
+    },
+    "P_vector_tanh_sustained": {
+      "name": "P_vector_tanh_sustained",
+      "value": 3.5,
+      "unit": "GFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. FP16-like synthetic vector throughput."
+    },
+    "P_vector_sigmoid_sustained": {
+      "name": "P_vector_sigmoid_sustained",
+      "value": 3.5,
+      "unit": "GFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. FP16-like synthetic vector throughput."
+    },
+    "P_vector_reduce_sum_sustained": {
+      "name": "P_vector_reduce_sum_sustained",
+      "value": 8.0,
+      "unit": "GFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. FP16-like synthetic vector throughput."
+    },
+    "P_vector_cast_sustained": {
+      "name": "P_vector_cast_sustained",
+      "value": 12.0,
+      "unit": "GFLOPS",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. FP16-like synthetic vector throughput."
+    },
+    "BW_gm_to_ub_sustained": {
+      "name": "BW_gm_to_ub_sustained",
+      "value": 90.0,
+      "unit": "GB/s",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. Synthetic MTE bandwidth."
+    },
+    "BW_ub_to_gm_sustained": {
+      "name": "BW_ub_to_gm_sustained",
+      "value": 88.0,
+      "unit": "GB/s",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. Synthetic MTE bandwidth."
+    },
+    "BW_gm_to_l1_sustained": {
+      "name": "BW_gm_to_l1_sustained",
+      "value": 145.0,
+      "unit": "GB/s",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. Synthetic MTE bandwidth."
+    },
+    "BW_l1_to_l0a_sustained": {
+      "name": "BW_l1_to_l0a_sustained",
+      "value": 460.0,
+      "unit": "GB/s",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. Synthetic MTE bandwidth."
+    },
+    "BW_l1_to_l0b_sustained": {
+      "name": "BW_l1_to_l0b_sustained",
+      "value": 460.0,
+      "unit": "GB/s",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. Synthetic MTE bandwidth."
+    },
+    "BW_l0c_to_gm_sustained": {
+      "name": "BW_l0c_to_gm_sustained",
+      "value": 82.0,
+      "unit": "GB/s",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. Synthetic MTE bandwidth."
+    },
+    "BW_l0c_to_ub_sustained": {
+      "name": "BW_l0c_to_ub_sustained",
+      "value": 300.0,
+      "unit": "GB/s",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. Synthetic MTE bandwidth."
+    },
+    "mandatory_handoff_cost_l0c_to_gm_to_ub": {
+      "name": "mandatory_handoff_cost_l0c_to_gm_to_ub",
+      "value": 2500.0,
+      "unit": "cycles",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. Synthetic handoff latency."
+    },
+    "scalar_overhead_factor": {
+      "name": "scalar_overhead_factor",
+      "value": 1.15,
+      "unit": "x",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. Synthetic scalar overhead multiplier."
+    }
+  },
+  "startup_latency": {
+    "cube": 20.0,
+    "vector": 35.0,
+    "scalar": 5.0,
+    "mte1": 30.0,
+    "mte2": 50.0,
+    "mte3": 40.0,
+    "fixpipe": 30.0
+  },
+  "mandatory_handoff_cycles": 2500.0,
+  "pipe_barrier_cycles_per_iter": 20.0,
+  "scalar_overhead_factor": 1.15
+}
