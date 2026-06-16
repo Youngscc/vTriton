@@ -1,0 +1,80 @@
+{
+  "kernel_name": "demo_compute_bound",
+  "elapsed_time_us": 0.22,
+  "diagnosis": "Compute Bound",
+  "bound_kind": "Compute Bound",
+  "dominant_component": "cube",
+  "dominant_item": "bf16",
+  "dominant_share": 1.0,
+  "exposed_control_frac_model": null,
+  "exposed_control_frac_measured": null,
+  "exposed_control_deficit_pts": null,
+  "exposed_control_deficit_us": null,
+  "n_sync_ops": null,
+  "hivm_bottleneck": {
+    "global_root_cause": "ComputeBound",
+    "global_evidence": "[max weightedPipeCycles on Cube=200]",
+    "global_explanation": "compute pipe Cube dominates modeled weighted cycles",
+    "global_suggestions": [
+      "提高 arithmetic intensity",
+      "融合相邻 compute ops 以减少启动和同步开销"
+    ],
+    "sync_overhead_ratio": 0.0,
+    "barrier_overhead_ratio": 0.0,
+    "one_iteration_cycles": 200.0,
+    "weighted_cycles": 200.0,
+    "pipe_busy_cycles": {
+      "Cube": 200.0
+    },
+    "weighted_pipe_cycles": {
+      "Cube": 200.0
+    },
+    "pipeline_diagnosis": {
+      "root_cause": "ComputeBound",
+      "bottleneck_pipe": "Cube",
+      "imbalance_ratio": 1.0,
+      "evidence": "[max weightedPipeCycles on Cube=200]",
+      "explanation": "compute pipe Cube has the highest weighted cycles",
+      "suggestions": [
+        "提高 compute-to-data ratio"
+      ]
+    },
+    "op_diagnoses": [
+      {
+        "op_id": 0,
+        "line_number": 1,
+        "op_name": "fake_matmul_compute_bound",
+        "pipe": "Cube",
+        "root_cause": "ComputeBound",
+        "evidence": "[duration=200 cyc, elements=1000000, flops=1000000, compute_work=180 cyc]",
+        "explanation": "fake_matmul_compute_bound on Cube: compute work dominates modeled duration",
+        "suggestions": [
+          "提高 arithmetic intensity",
+          "将 compute 与 MTE prefetch 重叠"
+        ],
+        "theoretical_min_cycles": 383.0,
+        "actual_cycles": 200.0,
+        "overhead_ratio": -0.915
+      }
+    ],
+    "warnings": []
+  },
+  "components": {
+    "cube": {
+      "component": "cube",
+      "work_done": 1000000.0,
+      "bound_work": 1000000.0,
+      "elapsed_time_us": 0.22,
+      "active_time_us": 0.2,
+      "actual_performance": 4545454.545454546,
+      "ideal_performance": 5100000.0,
+      "u_utilization": 0.8912655971479502,
+      "r_residency": 0.9090909090909092,
+      "e_efficiency": 0.9803921568627451,
+      "dominant_item": "bf16",
+      "dominant_share": 1.0,
+      "warnings": []
+    }
+  },
+  "warnings": []
+}

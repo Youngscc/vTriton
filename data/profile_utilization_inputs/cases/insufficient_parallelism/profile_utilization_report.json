@@ -1,0 +1,210 @@
+{
+  "kernel_name": "demo_insufficient_parallelism",
+  "elapsed_time_us": 1000.0,
+  "diagnosis": "Insufficient Parallelism",
+  "bound_kind": null,
+  "dominant_component": null,
+  "dominant_item": null,
+  "dominant_share": 0.0,
+  "exposed_control_frac_model": null,
+  "exposed_control_frac_measured": null,
+  "exposed_control_deficit_pts": null,
+  "exposed_control_deficit_us": null,
+  "n_sync_ops": null,
+  "hivm_bottleneck": {
+    "global_root_cause": "PipelineImbalance",
+    "global_evidence": "[weightedPipeCycles[Cube]=240, weightedPipeCycles[MTE1]=30, ratio=8.0x]",
+    "global_explanation": "Cube weighted cycles dominate MTE1 by 8.0x",
+    "global_suggestions": [
+      "将 Cube 工作与其他 pipe 通过 multi-buffer/software pipeline 重叠",
+      "检查 Cube/Vector split 是否能更均衡利用 AIC/AIV"
+    ],
+    "sync_overhead_ratio": 0.0,
+    "barrier_overhead_ratio": 0.0,
+    "one_iteration_cycles": 390.0,
+    "weighted_cycles": 240.0,
+    "pipe_busy_cycles": {
+      "CubeMTE2": 40.0,
+      "MTE1": 30.0,
+      "Cube": 240.0,
+      "Vector": 40.0,
+      "MTE3": 40.0
+    },
+    "weighted_pipe_cycles": {
+      "CubeMTE2": 40.0,
+      "MTE1": 30.0,
+      "Cube": 240.0,
+      "Vector": 40.0,
+      "MTE3": 40.0
+    },
+    "pipeline_diagnosis": {
+      "root_cause": "PipelineImbalance",
+      "bottleneck_pipe": "Cube",
+      "imbalance_ratio": 8.0,
+      "evidence": "[weightedPipeCycles[Cube]=240, weightedPipeCycles[MTE1]=30, ratio=8.0x]",
+      "explanation": "Cube weighted cycles dominate MTE1 by 8.0x",
+      "suggestions": [
+        "将 Cube 工作与其他 pipe 通过 multi-buffer/software pipeline 重叠",
+        "检查 Cube/Vector split 是否能更均衡利用 AIC/AIV"
+      ]
+    },
+    "op_diagnoses": [
+      {
+        "op_id": 2,
+        "line_number": 3,
+        "op_name": "fake_matmul_underfilled",
+        "pipe": "Cube",
+        "root_cause": "ComputeBound",
+        "evidence": "[duration=240 cyc, elements=200000, flops=200000, compute_work=220 cyc]",
+        "explanation": "fake_matmul_underfilled on Cube: compute work dominates modeled duration",
+        "suggestions": [
+          "提高 arithmetic intensity",
+          "将 compute 与 MTE prefetch 重叠"
+        ],
+        "theoretical_min_cycles": 93.0,
+        "actual_cycles": 240.0,
+        "overhead_ratio": 0.6125
+      },
+      {
+        "op_id": 0,
+        "line_number": 1,
+        "op_name": "fake_gm_to_l1",
+        "pipe": "CubeMTE2",
+        "root_cause": "StartupOverhead",
+        "evidence": "[duration=40 cyc, startup_latency=50 cyc, bytes=100000, startup/duration=125.0%]",
+        "explanation": "fake_gm_to_l1 on CubeMTE2: startup latency dominates transfer work; bytes=100000",
+        "suggestions": [
+          "增大 tile 或合并相邻 transfer，摊薄每次 DMA startup"
+        ],
+        "theoretical_min_cycles": 1276,
+        "actual_cycles": 40.0,
+        "overhead_ratio": -30.9
+      },
+      {
+        "op_id": 3,
+        "line_number": 4,
+        "op_name": "add",
+        "pipe": "Vector",
+        "root_cause": "StartupOverhead",
+        "evidence": "[duration=40 cyc, startup_latency=35 cyc, compute_work=5 cyc, elements=50000]",
+        "explanation": "add on Vector: startup latency dominates compute work",
+        "suggestions": [
+          "增大 tile size，摊薄 compute startup"
+        ],
+        "theoretical_min_cycles": 817.0,
+        "actual_cycles": 40.0,
+        "overhead_ratio": -19.425
+      },
+      {
+        "op_id": 4,
+        "line_number": 5,
+        "op_name": "fake_ub_to_gm",
+        "pipe": "MTE3",
+        "root_cause": "StartupOverhead",
+        "evidence": "[duration=40 cyc, startup_latency=40 cyc, bytes=50000, startup/duration=100.0%]",
+        "explanation": "fake_ub_to_gm on MTE3: startup latency dominates transfer work; bytes=50000",
+        "suggestions": [
+          "增大 tile 或合并相邻 transfer，摊薄每次 DMA startup"
+        ],
+        "theoretical_min_cycles": 1052,
+        "actual_cycles": 40.0,
+        "overhead_ratio": -25.3
+      },
+      {
+        "op_id": 1,
+        "line_number": 2,
+        "op_name": "fake_l1_to_l0a",
+        "pipe": "MTE1",
+        "root_cause": "ComputeBound",
+        "evidence": "[duration=30 cyc, elements=0, flops=0, compute_work=29 cyc]",
+        "explanation": "fake_l1_to_l0a on MTE1: compute work dominates modeled duration",
+        "suggestions": [
+          "提高 arithmetic intensity",
+          "将 compute 与 MTE prefetch 重叠"
+        ],
+        "theoretical_min_cycles": 30.0,
+        "actual_cycles": 30.0,
+        "overhead_ratio": 0.0
+      }
+    ],
+    "warnings": []
+  },
+  "components": {
+    "cube": {
+      "component": "cube",
+      "work_done": 200000.0,
+      "bound_work": 200000.0,
+      "elapsed_time_us": 1000.0,
+      "active_time_us": 80.0,
+      "actual_performance": 200.0,
+      "ideal_performance": 5100000.0,
+      "u_utilization": 3.9215686274509805e-05,
+      "r_residency": 0.08,
+      "e_efficiency": 0.0004901960784313725,
+      "dominant_item": "bf16",
+      "dominant_share": 1.0,
+      "warnings": []
+    },
+    "vector": {
+      "component": "vector",
+      "work_done": 50000.0,
+      "bound_work": 50000.0,
+      "elapsed_time_us": 1000.0,
+      "active_time_us": 40.0,
+      "actual_performance": 50.0,
+      "ideal_performance": 18000.0,
+      "u_utilization": 0.002777777777777778,
+      "r_residency": 0.04,
+      "e_efficiency": 0.06944444444444445,
+      "dominant_item": "bf16",
+      "dominant_share": 1.0,
+      "warnings": []
+    },
+    "mte_gm": {
+      "component": "mte_gm",
+      "work_done": 100000.0,
+      "bound_work": 100000.0,
+      "elapsed_time_us": 1000.0,
+      "active_time_us": 40.0,
+      "actual_performance": 100.0,
+      "ideal_performance": 145000.0,
+      "u_utilization": 0.000689655172413793,
+      "r_residency": 0.04,
+      "e_efficiency": 0.017241379310344827,
+      "dominant_item": "gm->l1",
+      "dominant_share": 1.0,
+      "warnings": []
+    },
+    "mte_l1": {
+      "component": "mte_l1",
+      "work_done": 50000.0,
+      "bound_work": 50000.0,
+      "elapsed_time_us": 1000.0,
+      "active_time_us": 20.0,
+      "actual_performance": 50.0,
+      "ideal_performance": 460000.0,
+      "u_utilization": 0.00010869565217391305,
+      "r_residency": 0.02,
+      "e_efficiency": 0.005434782608695652,
+      "dominant_item": "l1->l0a",
+      "dominant_share": 1.0,
+      "warnings": []
+    },
+    "mte_ub": {
+      "component": "mte_ub",
+      "work_done": 50000.0,
+      "bound_work": 50000.0,
+      "elapsed_time_us": 1000.0,
+      "active_time_us": 20.0,
+      "actual_performance": 50.0,
+      "ideal_performance": 87999.99999999999,
+      "u_utilization": 0.0005681818181818183,
+      "r_residency": 0.02,
+      "e_efficiency": 0.02840909090909091,
+      "dominant_item": "ub->gm",
+      "dominant_share": 1.0,
+      "warnings": []
+    }
+  },
+  "warnings": []
+}

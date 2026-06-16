@@ -1,0 +1,80 @@
+{
+  "kernel_name": "demo_inefficient_mte",
+  "elapsed_time_us": 50.0,
+  "diagnosis": "Inefficient MTE",
+  "bound_kind": null,
+  "dominant_component": "mte_ub",
+  "dominant_item": "ub->gm",
+  "dominant_share": 1.0,
+  "exposed_control_frac_model": null,
+  "exposed_control_frac_measured": null,
+  "exposed_control_deficit_pts": null,
+  "exposed_control_deficit_us": null,
+  "n_sync_ops": null,
+  "hivm_bottleneck": {
+    "global_root_cause": "BandwidthBound",
+    "global_evidence": "[max weightedPipeCycles on MTE3=120]",
+    "global_explanation": "memory pipe MTE3 dominates modeled weighted cycles",
+    "global_suggestions": [
+      "减少 data movement 或增加 tile reuse",
+      "用 software pipeline 将 transfer 与 compute 重叠"
+    ],
+    "sync_overhead_ratio": 0.0,
+    "barrier_overhead_ratio": 0.0,
+    "one_iteration_cycles": 120.0,
+    "weighted_cycles": 120.0,
+    "pipe_busy_cycles": {
+      "MTE3": 120.0
+    },
+    "weighted_pipe_cycles": {
+      "MTE3": 120.0
+    },
+    "pipeline_diagnosis": {
+      "root_cause": "BandwidthBound",
+      "bottleneck_pipe": "MTE3",
+      "imbalance_ratio": 1.0,
+      "evidence": "[max weightedPipeCycles on MTE3=120]",
+      "explanation": "memory pipe MTE3 has the highest weighted cycles",
+      "suggestions": [
+        "减少数据搬运或提高 tile reuse"
+      ]
+    },
+    "op_diagnoses": [
+      {
+        "op_id": 0,
+        "line_number": 1,
+        "op_name": "fake_ub_to_gm_slow",
+        "pipe": "MTE3",
+        "root_cause": "BandwidthBound",
+        "evidence": "[duration=120 cyc, transfer_cycles=80 cyc, bytes=1000000, src_space=ub, dst_space=gm]",
+        "explanation": "fake_ub_to_gm_slow on MTE3: data movement dominates modeled duration",
+        "suggestions": [
+          "减少数据搬运量或提高 tile reuse",
+          "用 software pipeline 将 transfer 与 compute 重叠"
+        ],
+        "theoretical_min_cycles": 21023,
+        "actual_cycles": 120.0,
+        "overhead_ratio": -174.19166666666666
+      }
+    ],
+    "warnings": []
+  },
+  "components": {
+    "mte_ub": {
+      "component": "mte_ub",
+      "work_done": 1000000.0,
+      "bound_work": 1000000.0,
+      "elapsed_time_us": 50.0,
+      "active_time_us": 40.0,
+      "actual_performance": 20000.0,
+      "ideal_performance": 88000.0,
+      "u_utilization": 0.22727272727272727,
+      "r_residency": 0.8,
+      "e_efficiency": 0.28409090909090906,
+      "dominant_item": "ub->gm",
+      "dominant_share": 1.0,
+      "warnings": []
+    }
+  },
+  "warnings": []
+}

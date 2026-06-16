@@ -1,0 +1,96 @@
+{
+  "kernel_name": "demo_sync_overhead",
+  "elapsed_time_us": 100.0,
+  "diagnosis": "Insufficient Parallelism",
+  "bound_kind": null,
+  "dominant_component": null,
+  "dominant_item": null,
+  "dominant_share": 0.0,
+  "exposed_control_frac_model": null,
+  "exposed_control_frac_measured": null,
+  "exposed_control_deficit_pts": null,
+  "exposed_control_deficit_us": null,
+  "n_sync_ops": null,
+  "hivm_bottleneck": {
+    "global_root_cause": "SyncOverhead",
+    "global_evidence": "[syncCycles=30 cyc, barrierCycles=30 cyc, oneIterationCycles=100 cyc, sync=30.0%, barrier=30.0%]",
+    "global_explanation": "sync/barrier ratio exceeds HIVMBottleneckDiagnoser thresholds (sync>20% or barrier>15%)",
+    "global_suggestions": [
+      "减少全局 barrier，优先使用局部 set_flag/wait_flag",
+      "增加 multi-buffer pipeline depth 以隐藏同步等待"
+    ],
+    "sync_overhead_ratio": 30.0,
+    "barrier_overhead_ratio": 30.0,
+    "one_iteration_cycles": 100.0,
+    "weighted_cycles": 100.0,
+    "pipe_busy_cycles": {
+      "Vector": 70.0
+    },
+    "weighted_pipe_cycles": {
+      "Vector": 70.0
+    },
+    "pipeline_diagnosis": {
+      "root_cause": "ComputeBound",
+      "bottleneck_pipe": "Vector",
+      "imbalance_ratio": 1.0,
+      "evidence": "[max weightedPipeCycles on Vector=70]",
+      "explanation": "compute pipe Vector has the highest weighted cycles",
+      "suggestions": [
+        "提高 compute-to-data ratio"
+      ]
+    },
+    "op_diagnoses": [
+      {
+        "op_id": 0,
+        "line_number": 1,
+        "op_name": "add",
+        "pipe": "Vector",
+        "root_cause": "ComputeBound",
+        "evidence": "[duration=70 cyc, elements=10000, flops=10000, compute_work=35 cyc]",
+        "explanation": "add on Vector: compute work dominates modeled duration",
+        "suggestions": [
+          "提高 arithmetic intensity",
+          "将 compute 与 MTE prefetch 重叠"
+        ],
+        "theoretical_min_cycles": 192.0,
+        "actual_cycles": 70.0,
+        "overhead_ratio": -1.7428571428571429
+      },
+      {
+        "op_id": 1,
+        "line_number": 2,
+        "op_name": "pipe_barrier",
+        "pipe": "All",
+        "root_cause": "SyncOverhead",
+        "evidence": "[is_sync=True, is_barrier=True, duration=30 cyc]",
+        "explanation": "pipe_barrier on All: synchronization/control op with no arithmetic/transfer work",
+        "suggestions": [
+          "用更细粒度 set_flag/wait_flag 替代 PIPE_ALL barrier",
+          "增加 multi-buffer pipeline depth 以降低 barrier 频率"
+        ],
+        "theoretical_min_cycles": 0.0,
+        "actual_cycles": 30.0,
+        "overhead_ratio": 1.0
+      }
+    ],
+    "warnings": []
+  },
+  "components": {
+    "vector": {
+      "component": "vector",
+      "work_done": 10000.0,
+      "bound_work": 10000.0,
+      "elapsed_time_us": 100.0,
+      "active_time_us": 10.0,
+      "actual_performance": 100.0,
+      "ideal_performance": 18000.0,
+      "u_utilization": 0.005555555555555556,
+      "r_residency": 0.1,
+      "e_efficiency": 0.05555555555555555,
+      "dominant_item": "bf16",
+      "dominant_share": 1.0,
+      "warnings": []
+    }
+  },
+  "warnings": []
+}

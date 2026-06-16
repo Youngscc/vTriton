@@ -1,0 +1,339 @@
+{
+  "description": "Hand-derived reference cases from HIVMBottleneckDiagnosis.cpp. These are fake DES-like inputs for comparing Python diagnosis with the C++ branch logic.",
+  "cases": [
+    {
+      "name": "sync_overhead_global",
+      "description": "Global SyncOverhead wins when sync/barrier cycles exceed C++ thresholds.",
+      "operations": [
+        {
+          "id": 0,
+          "name": "vadd",
+          "pipe": "Vector",
+          "duration": 70,
+          "start_cycle": 0,
+          "end_cycle": 70,
+          "depends_on": [],
+          "is_sync": false,
+          "is_barrier": false,
+          "bytes": 0,
+          "elements": 1024,
+          "flops": 1024,
+          "loop_multiplier": 1,
+          "src_space": "ub",
+          "dst_space": "ub",
+          "elem_type": "fp16",
+          "repeat": 1,
+          "mask": 128,
+          "line": 10,
+          "core_type": "AIV",
+          "event_id": 0
+        },
+        {
+          "id": 1,
+          "name": "pipe_barrier",
+          "pipe": "All",
+          "duration": 30,
+          "start_cycle": 70,
+          "end_cycle": 100,
+          "depends_on": [0],
+          "is_sync": true,
+          "is_barrier": true,
+          "bytes": 0,
+          "elements": 0,
+          "flops": 0,
+          "loop_multiplier": 1,
+          "src_space": "",
+          "dst_space": "",
+          "elem_type": "fp16",
+          "repeat": 1,
+          "mask": 0,
+          "line": 11,
+          "core_type": "AIV",
+          "event_id": 1
+        }
+      ],
+      "expected": {
+        "global_root_cause": "SyncOverhead",
+        "pipeline_root_cause": "ComputeBound",
+        "pipeline_bottleneck": "Vector",
+        "sync_overhead_ratio": 30.0,
+        "barrier_overhead_ratio": 30.0,
+        "op_root_causes": {
+          "0": "ComputeBound",
+          "1": "SyncOverhead"
+        }
+      }
+    },
+    {
+      "name": "weighted_pipeline_imbalance",
+      "description": "C++ diagnoses PipelineImbalance when max/min weightedPipeCycles > 3.0.",
+      "operations": [
+        {
+          "id": 0,
+          "name": "fake_matmul",
+          "pipe": "Cube",
+          "duration": 400,
+          "start_cycle": 0,
+          "end_cycle": 400,
+          "depends_on": [],
+          "is_sync": false,
+          "is_barrier": false,
+          "bytes": 0,
+          "elements": 4096,
+          "flops": 4096,
+          "loop_multiplier": 1,
+          "src_space": "",
+          "dst_space": "",
+          "elem_type": "fp16",
+          "repeat": 1,
+          "mask": 128,
+          "line": 20,
+          "core_type": "AIC",
+          "event_id": 0
+        },
+        {
+          "id": 1,
+          "name": "vadd",
+          "pipe": "Vector",
+          "duration": 100,
+          "start_cycle": 0,
+          "end_cycle": 100,
+          "depends_on": [],
+          "is_sync": false,
+          "is_barrier": false,
+          "bytes": 0,
+          "elements": 1024,
+          "flops": 1024,
+          "loop_multiplier": 1,
+          "src_space": "ub",
+          "dst_space": "ub",
+          "elem_type": "fp16",
+          "repeat": 1,
+          "mask": 128,
+          "line": 21,
+          "core_type": "AIV",
+          "event_id": 1
+        }
+      ],
+      "expected": {
+        "global_root_cause": "PipelineImbalance",
+        "pipeline_root_cause": "PipelineImbalance",
+        "pipeline_bottleneck": "Cube",
+        "pipeline_imbalance_ratio": 4.0,
+        "op_root_causes": {
+          "0": "ComputeBound",
+          "1": "ComputeBound"
+        }
+      }
+    },
+    {
+      "name": "memory_pipe_bandwidth_bound",
+      "description": "Without sync or imbalance, max weighted memory pipe gives BandwidthBound.",
+      "operations": [
+        {
+          "id": 0,
+          "name": "gm_to_ub",
+          "pipe": "VectorMTE2",
+          "duration": 100,
+          "start_cycle": 0,
+          "end_cycle": 100,
+          "depends_on": [],
+          "is_sync": false,
+          "is_barrier": false,
+          "bytes": 4096,
+          "elements": 0,
+          "flops": 0,
+          "loop_multiplier": 1,
+          "src_space": "gm",
+          "dst_space": "ub",
+          "elem_type": "fp16",
+          "repeat": 1,
+          "mask": 0,
+          "line": 30,
+          "core_type": "AIV",
+          "event_id": 0
+        },
+        {
+          "id": 1,
+          "name": "vadd",
+          "pipe": "Vector",
+          "duration": 80,
+          "start_cycle": 0,
+          "end_cycle": 80,
+          "depends_on": [0],
+          "is_sync": false,
+          "is_barrier": false,
+          "bytes": 0,
+          "elements": 4096,
+          "flops": 4096,
+          "loop_multiplier": 1,
+          "src_space": "ub",
+          "dst_space": "ub",
+          "elem_type": "fp16",
+          "repeat": 1,
+          "mask": 128,
+          "line": 31,
+          "core_type": "AIV",
+          "event_id": 1
+        }
+      ],
+      "expected": {
+        "global_root_cause": "BandwidthBound",
+        "pipeline_root_cause": "BandwidthBound",
+        "pipeline_bottleneck": "VectorMTE2",
+        "op_root_causes": {
+          "0": "BandwidthBound",
+          "1": "ComputeBound"
+        }
+      }
+    },
+    {
+      "name": "compute_pipe_compute_bound",
+      "description": "Without sync or imbalance, max weighted Cube/Vector pipe gives ComputeBound.",
+      "operations": [
+        {
+          "id": 0,
+          "name": "fake_matmul",
+          "pipe": "Cube",
+          "duration": 100,
+          "start_cycle": 0,
+          "end_cycle": 100,
+          "depends_on": [],
+          "is_sync": false,
+          "is_barrier": false,
+          "bytes": 0,
+          "elements": 4096,
+          "flops": 4096,
+          "loop_multiplier": 1,
+          "src_space": "",
+          "dst_space": "",
+          "elem_type": "fp16",
+          "repeat": 1,
+          "mask": 128,
+          "line": 40,
+          "core_type": "AIC",
+          "event_id": 0
+        },
+        {
+          "id": 1,
+          "name": "gm_to_ub",
+          "pipe": "VectorMTE2",
+          "duration": 90,
+          "start_cycle": 0,
+          "end_cycle": 90,
+          "depends_on": [],
+          "is_sync": false,
+          "is_barrier": false,
+          "bytes": 4096,
+          "elements": 0,
+          "flops": 0,
+          "loop_multiplier": 1,
+          "src_space": "gm",
+          "dst_space": "ub",
+          "elem_type": "fp16",
+          "repeat": 1,
+          "mask": 0,
+          "line": 41,
+          "core_type": "AIV",
+          "event_id": 1
+        }
+      ],
+      "expected": {
+        "global_root_cause": "ComputeBound",
+        "pipeline_root_cause": "ComputeBound",
+        "pipeline_bottleneck": "Cube",
+        "op_root_causes": {
+          "0": "ComputeBound",
+          "1": "StartupOverhead"
+        }
+      }
+    },
+    {
+      "name": "small_transfer_startup_overhead_op",
+      "description": "Small MTE2 transfer pays startup > transfer_work, but global remains BandwidthBound.",
+      "operations": [
+        {
+          "id": 0,
+          "name": "tiny_gm_to_ub",
+          "pipe": "VectorMTE2",
+          "duration": 60,
+          "start_cycle": 0,
+          "end_cycle": 60,
+          "depends_on": [],
+          "is_sync": false,
+          "is_barrier": false,
+          "bytes": 64,
+          "elements": 0,
+          "flops": 0,
+          "loop_multiplier": 1,
+          "src_space": "gm",
+          "dst_space": "ub",
+          "elem_type": "fp16",
+          "repeat": 1,
+          "mask": 0,
+          "line": 50,
+          "core_type": "AIV",
+          "event_id": 0
+        }
+      ],
+      "expected": {
+        "global_root_cause": "BandwidthBound",
+        "pipeline_root_cause": "BandwidthBound",
+        "pipeline_bottleneck": "VectorMTE2",
+        "op_root_causes": {
+          "0": "StartupOverhead"
+        }
+      }
+    },
+    {
+      "name": "fixpipe_bandwidth_default_pipeline",
+      "description": "FixPipe op uses the C++ FixPipe branch and pipeline/global default to BandwidthBound.",
+      "operations": [
+        {
+          "id": 0,
+          "name": "l0c_to_ub",
+          "pipe": "FixPipe",
+          "duration": 40,
+          "start_cycle": 0,
+          "end_cycle": 40,
+          "depends_on": [],
+          "is_sync": false,
+          "is_barrier": false,
+          "bytes": 8192,
+          "elements": 0,
+          "flops": 0,
+          "loop_multiplier": 1,
+          "src_space": "l0c",
+          "dst_space": "ub",
+          "elem_type": "fp16",
+          "repeat": 1,
+          "mask": 0,
+          "line": 60,
+          "core_type": "AIC",
+          "event_id": 0
+        }
+      ],
+      "expected": {
+        "global_root_cause": "BandwidthBound",
+        "pipeline_root_cause": "BandwidthBound",
+        "pipeline_bottleneck": "FixPipe",
+        "op_root_causes": {
+          "0": "BandwidthBound"
+        }
+      }
+    },
+    {
+      "name": "empty_report_low_parallelism",
+      "description": "No weighted pipe activity gives LowParallelism.",
+      "operations": [],
+      "expected": {
+        "global_root_cause": "LowParallelism",
+        "pipeline_root_cause": "LowParallelism",
+        "pipeline_bottleneck": "Unknown",
+        "sync_overhead_ratio": 0.0,
+        "barrier_overhead_ratio": 0.0,
+        "op_root_causes": {}
+      }
+    }
+  ]
+}

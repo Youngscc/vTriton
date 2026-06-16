@@ -373,6 +373,15 @@
       "source": "fake_placeholder",
       "n_runs": 0,
       "notes": "FAKE DATA. Synthetic scalar overhead multiplier."
+    },
+    "startup_latency_pipe_barrier": {
+      "name": "startup_latency_pipe_barrier",
+      "value": 64.0,
+      "unit": "cycles",
+      "ci_95": 0.0,
+      "source": "fake_placeholder",
+      "n_runs": 0,
+      "notes": "FAKE DATA. Synthetic PIPE_ALL barrier startup latency."
     }
   },
   "startup_latency": {
@@ -382,7 +391,8 @@
     "mte1": 30.0,
     "mte2": 50.0,
     "mte3": 40.0,
-    "fixpipe": 30.0
+    "fixpipe": 30.0,
+    "pipe_barrier": 64.0
   },
   "mandatory_handoff_cycles": 2500.0,
   "pipe_barrier_cycles_per_iter": 20.0,

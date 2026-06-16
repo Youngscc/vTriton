@@ -1,0 +1,354 @@
+{
+  "traceEvents": [
+    {
+      "ph": "M",
+      "pid": 1,
+      "tid": 0,
+      "name": "process_name",
+      "args": {
+        "name": "AIC (Cube Core)"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 2,
+      "tid": 0,
+      "name": "process_name",
+      "args": {
+        "name": "AIV (Vector Core)"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 3,
+      "tid": 0,
+      "name": "process_name",
+      "args": {
+        "name": "Shared"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 1,
+      "tid": 1,
+      "name": "thread_name",
+      "args": {
+        "name": "Cube"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 1,
+      "tid": 2,
+      "name": "thread_name",
+      "args": {
+        "name": "MTE1"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 1,
+      "tid": 3,
+      "name": "thread_name",
+      "args": {
+        "name": "CubeMTE2"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 1,
+      "tid": 4,
+      "name": "thread_name",
+      "args": {
+        "name": "FixPipe"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 1,
+      "tid": 5,
+      "name": "thread_name",
+      "args": {
+        "name": "Scalar"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 2,
+      "tid": 1,
+      "name": "thread_name",
+      "args": {
+        "name": "Vector"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 2,
+      "tid": 2,
+      "name": "thread_name",
+      "args": {
+        "name": "VectorMTE2"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 2,
+      "tid": 3,
+      "name": "thread_name",
+      "args": {
+        "name": "MTE3"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 2,
+      "tid": 5,
+      "name": "thread_name",
+      "args": {
+        "name": "Scalar"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 3,
+      "tid": 1,
+      "name": "thread_name",
+      "args": {
+        "name": "All"
+      }
+    },
+    {
+      "ph": "X",
+      "pid": 1,
+      "tid": 3,
+      "ts": 0.0,
+      "dur": 0.043,
+      "name": "fake_gm_to_l1",
+      "args": {
+        "line": 1,
+        "cycles": 80,
+        "loop_multiplier": 4,
+        "bytes": 262144,
+        "elements": 0,
+        "event_id": "",
+        "event_generation": 0,
+        "sender_pipe": "Unknown",
+        "receiver_pipe": "Unknown",
+        "read_buffers": "",
+        "write_buffers": "l1_a",
+        "read_versions": "",
+        "write_versions": "0",
+        "core_type": "AIC",
+        "sync": false,
+        "barrier": false,
+        "src_space": "gm",
+        "dst_space": "l1",
+        "elem_type": "bf16"
+      }
+    },
+    {
+      "ph": "X",
+      "pid": 1,
+      "tid": 2,
+      "ts": 0.043,
+      "dur": 0.022,
+      "name": "fake_l1_to_l0a",
+      "args": {
+        "line": 2,
+        "cycles": 40,
+        "loop_multiplier": 4,
+        "bytes": 131072,
+        "elements": 0,
+        "event_id": "",
+        "event_generation": 0,
+        "sender_pipe": "Unknown",
+        "receiver_pipe": "Unknown",
+        "read_buffers": "l1_a",
+        "write_buffers": "l0a",
+        "read_versions": "0",
+        "write_versions": "0",
+        "core_type": "AIC",
+        "sync": false,
+        "barrier": false,
+        "src_space": "l1",
+        "dst_space": "l0a",
+        "elem_type": "bf16"
+      }
+    },
+    {
+      "ph": "X",
+      "pid": 1,
+      "tid": 1,
+      "ts": 0.065,
+      "dur": 0.086,
+      "name": "fake_matmul",
+      "args": {
+        "line": 3,
+        "cycles": 160,
+        "loop_multiplier": 4,
+        "bytes": 0,
+        "elements": 1048576,
+        "event_id": "",
+        "event_generation": 0,
+        "sender_pipe": "Unknown",
+        "receiver_pipe": "Unknown",
+        "read_buffers": "l0a",
+        "write_buffers": "l0c",
+        "read_versions": "0",
+        "write_versions": "0",
+        "core_type": "AIC",
+        "sync": false,
+        "barrier": false,
+        "src_space": "",
+        "dst_space": "",
+        "elem_type": "bf16"
+      }
+    },
+    {
+      "ph": "X",
+      "pid": 1,
+      "tid": 4,
+      "ts": 0.151,
+      "dur": 0.032,
+      "name": "fake_l0c_to_ub",
+      "args": {
+        "line": 4,
+        "cycles": 60,
+        "loop_multiplier": 4,
+        "bytes": 65536,
+        "elements": 0,
+        "event_id": "",
+        "event_generation": 0,
+        "sender_pipe": "Unknown",
+        "receiver_pipe": "Unknown",
+        "read_buffers": "l0c",
+        "write_buffers": "ub_acc",
+        "read_versions": "0",
+        "write_versions": "0",
+        "core_type": "AIC",
+        "sync": false,
+        "barrier": false,
+        "src_space": "l0c",
+        "dst_space": "ub",
+        "elem_type": "bf16"
+      }
+    },
+    {
+      "ph": "X",
+      "pid": 2,
+      "tid": 2,
+      "ts": 0.0,
+      "dur": 0.038,
+      "name": "fake_gm_to_ub",
+      "args": {
+        "line": 5,
+        "cycles": 70,
+        "loop_multiplier": 4,
+        "bytes": 131072,
+        "elements": 0,
+        "event_id": "",
+        "event_generation": 0,
+        "sender_pipe": "Unknown",
+        "receiver_pipe": "Unknown",
+        "read_buffers": "",
+        "write_buffers": "ub_x",
+        "read_versions": "",
+        "write_versions": "0",
+        "core_type": "AIV",
+        "sync": false,
+        "barrier": false,
+        "src_space": "gm",
+        "dst_space": "ub",
+        "elem_type": "bf16"
+      }
+    },
+    {
+      "ph": "X",
+      "pid": 2,
+      "tid": 1,
+      "ts": 0.184,
+      "dur": 0.049,
+      "name": "add",
+      "args": {
+        "line": 6,
+        "cycles": 90,
+        "loop_multiplier": 4,
+        "bytes": 0,
+        "elements": 524288,
+        "event_id": "",
+        "event_generation": 0,
+        "sender_pipe": "Unknown",
+        "receiver_pipe": "Unknown",
+        "read_buffers": "ub_acc;ub_x",
+        "write_buffers": "ub_y",
+        "read_versions": "0;0",
+        "write_versions": "0",
+        "core_type": "AIV",
+        "sync": false,
+        "barrier": false,
+        "src_space": "",
+        "dst_space": "",
+        "elem_type": "bf16"
+      }
+    },
+    {
+      "ph": "X",
+      "pid": 2,
+      "tid": 3,
+      "ts": 0.232,
+      "dur": 0.038,
+      "name": "fake_ub_to_gm",
+      "args": {
+        "line": 7,
+        "cycles": 70,
+        "loop_multiplier": 4,
+        "bytes": 131072,
+        "elements": 0,
+        "event_id": "",
+        "event_generation": 0,
+        "sender_pipe": "Unknown",
+        "receiver_pipe": "Unknown",
+        "read_buffers": "ub_y",
+        "write_buffers": "",
+        "read_versions": "0",
+        "write_versions": "",
+        "core_type": "AIV",
+        "sync": false,
+        "barrier": false,
+        "src_space": "ub",
+        "dst_space": "gm",
+        "elem_type": "bf16"
+      }
+    },
+    {
+      "ph": "X",
+      "pid": 1,
+      "tid": 5,
+      "ts": 0.27,
+      "dur": 0.016,
+      "name": "fake_scalar_loop",
+      "args": {
+        "line": 8,
+        "cycles": 30,
+        "loop_multiplier": 4,
+        "bytes": 0,
+        "elements": 0,
+        "event_id": "",
+        "event_generation": 0,
+        "sender_pipe": "Unknown",
+        "receiver_pipe": "Unknown",
+        "read_buffers": "",
+        "write_buffers": "",
+        "read_versions": "",
+        "write_versions": "",
+        "core_type": "AIC",
+        "sync": false,
+        "barrier": false,
+        "src_space": "",
+        "dst_space": "",
+        "elem_type": "i32"
+      }
+    }
+  ],
+  "displayTimeUnit": "us"
+}

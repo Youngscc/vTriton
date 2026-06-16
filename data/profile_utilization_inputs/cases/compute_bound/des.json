@@ -1,0 +1,30 @@
+{
+  "clock_ghz": 1.85,
+  "description": "FAKE DATA. Demo case shaped to trigger operator Compute Bound and HIVM ComputeBound.",
+  "schedule_truncated": false,
+  "operations": [
+    {
+      "id": 0,
+      "name": "fake_matmul_compute_bound",
+      "pipe": "Cube",
+      "duration": 200,
+      "line": 1,
+      "depends_on": [],
+      "is_sync": false,
+      "is_barrier": false,
+      "event_id": "",
+      "core_type": "AIC",
+      "bytes": 0,
+      "elements": 1000000,
+      "flops": 1000000,
+      "loop_multiplier": 1,
+      "repeat": 1,
+      "mask": 128,
+      "src_space": "l0a",
+      "dst_space": "l0c",
+      "elem_type": "bf16",
+      "start_cycle": 0,
+      "end_cycle": 200
+    }
+  ]
+}

@@ -1,0 +1,180 @@
+{
+  "traceEvents": [
+    {
+      "ph": "M",
+      "pid": 1,
+      "tid": 0,
+      "name": "process_name",
+      "args": {
+        "name": "AIC (Cube Core)"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 2,
+      "tid": 0,
+      "name": "process_name",
+      "args": {
+        "name": "AIV (Vector Core)"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 3,
+      "tid": 0,
+      "name": "process_name",
+      "args": {
+        "name": "Shared"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 1,
+      "tid": 1,
+      "name": "thread_name",
+      "args": {
+        "name": "Cube"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 1,
+      "tid": 2,
+      "name": "thread_name",
+      "args": {
+        "name": "MTE1"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 1,
+      "tid": 3,
+      "name": "thread_name",
+      "args": {
+        "name": "CubeMTE2"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 1,
+      "tid": 4,
+      "name": "thread_name",
+      "args": {
+        "name": "FixPipe"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 1,
+      "tid": 5,
+      "name": "thread_name",
+      "args": {
+        "name": "Scalar"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 2,
+      "tid": 1,
+      "name": "thread_name",
+      "args": {
+        "name": "Vector"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 2,
+      "tid": 2,
+      "name": "thread_name",
+      "args": {
+        "name": "VectorMTE2"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 2,
+      "tid": 3,
+      "name": "thread_name",
+      "args": {
+        "name": "MTE3"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 2,
+      "tid": 5,
+      "name": "thread_name",
+      "args": {
+        "name": "Scalar"
+      }
+    },
+    {
+      "ph": "M",
+      "pid": 3,
+      "tid": 1,
+      "name": "thread_name",
+      "args": {
+        "name": "All"
+      }
+    },
+    {
+      "ph": "X",
+      "pid": 2,
+      "tid": 1,
+      "ts": 0.0,
+      "dur": 0.038,
+      "name": "add",
+      "args": {
+        "line": 1,
+        "cycles": 70,
+        "loop_multiplier": 1,
+        "bytes": 0,
+        "elements": 10000,
+        "event_id": "",
+        "event_generation": 0,
+        "sender_pipe": "Unknown",
+        "receiver_pipe": "Unknown",
+        "read_buffers": "",
+        "write_buffers": "",
+        "read_versions": "",
+        "write_versions": "",
+        "core_type": "AIV",
+        "sync": false,
+        "barrier": false,
+        "src_space": "ub",
+        "dst_space": "ub",
+        "elem_type": "bf16"
+      }
+    },
+    {
+      "ph": "X",
+      "pid": 2,
+      "tid": 1,
+      "ts": 0.038,
+      "dur": 0.016,
+      "name": "pipe_barrier",
+      "args": {
+        "line": 2,
+        "cycles": 30,
+        "loop_multiplier": 1,
+        "bytes": 0,
+        "elements": 0,
+        "event_id": "demo_barrier",
+        "event_generation": 0,
+        "sender_pipe": "Unknown",
+        "receiver_pipe": "Unknown",
+        "read_buffers": "",
+        "write_buffers": "",
+        "read_versions": "",
+        "write_versions": "",
+        "core_type": "AIV",
+        "sync": true,
+        "barrier": true,
+        "src_space": "sync",
+        "dst_space": "sync",
+        "elem_type": "bf16"
+      }
+    }
+  ],
+  "displayTimeUnit": "us"
+}

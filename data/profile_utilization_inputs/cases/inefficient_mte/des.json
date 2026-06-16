@@ -1,0 +1,30 @@
+{
+  "clock_ghz": 1.85,
+  "description": "FAKE DATA. Demo case shaped to trigger operator Inefficient MTE and HIVM BandwidthBound.",
+  "schedule_truncated": false,
+  "operations": [
+    {
+      "id": 0,
+      "name": "fake_ub_to_gm_slow",
+      "pipe": "MTE3",
+      "duration": 120,
+      "line": 1,
+      "depends_on": [],
+      "is_sync": false,
+      "is_barrier": false,
+      "event_id": "",
+      "core_type": "AIV",
+      "bytes": 1000000,
+      "elements": 0,
+      "flops": 0,
+      "loop_multiplier": 1,
+      "repeat": 1,
+      "mask": 0,
+      "src_space": "ub",
+      "dst_space": "gm",
+      "elem_type": "bf16",
+      "start_cycle": 0,
+      "end_cycle": 120
+    }
+  ]
+}
