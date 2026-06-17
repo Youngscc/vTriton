@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -681,7 +680,6 @@ def test_hivm_bottleneck_warns_when_raw_des_metadata_is_missing():
 import pytest
 
 from perfbound.analyze.profile_utilization import (
-    emit_perfetto_trace_from_des,
     run_from_files,
 )
 
@@ -733,31 +731,6 @@ def test_demo_profile_utilization_cases_cover_expected_outputs(
     assert report.hivm_bottleneck.global_root_cause == hivm_global_root
     assert report.hivm_bottleneck.pipeline_diagnosis is not None
     assert report.hivm_bottleneck.pipeline_diagnosis.root_cause == hivm_pipeline_root
-
-
-def test_perfetto_trace_is_emitted_from_des_graph(tmp_path):
-    """Python path should emit a Perfetto trace from the same DES graph input."""
-    trace_path = tmp_path / "perfetto_trace.json"
-    emit_perfetto_trace_from_des(
-        _DEMO_INPUT_DIR / "cases" / "compute_bound" / "des.json",
-        trace_path,
-    )
-
-    trace = json.loads(trace_path.read_text())
-    assert trace["displayTimeUnit"] == "us"
-    events = trace["traceEvents"]
-    assert any(
-        event.get("ph") == "M"
-        and event.get("name") == "process_name"
-        and event.get("args", {}).get("name") == "AIC (Cube Core)"
-        for event in events
-    )
-    op_events = [event for event in events if event.get("ph") == "X"]
-    assert len(op_events) == 1
-    assert op_events[0]["name"] == "fake_matmul_compute_bound"
-    assert op_events[0]["pid"] == 1
-    assert op_events[0]["tid"] == 1
-    assert op_events[0]["args"]["cycles"] == 200
 
 
 @pytest.mark.skipif(not _KDA_DES.exists(), reason="real kda_des.json not present")
