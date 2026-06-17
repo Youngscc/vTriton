@@ -464,8 +464,10 @@ inline LoopTripCountResult analyzeScfForTripCount(scf::ForOp forOp) {
 /// If bindings are missing for required args/program_ids, returns error in result.
 inline LoopTripCountResult getScfForTripCountWithBindings(
     scf::ForOp forOp,
-    const llvm::DenseMap<unsigned, int64_t> &argBindings = {},
-    const llvm::StringMap<int64_t> &programIdBindings = {}) {
+    const llvm::DenseMap<unsigned, int64_t> &argBindings =
+        llvm::DenseMap<unsigned, int64_t>(),
+    const llvm::StringMap<int64_t> &programIdBindings =
+        llvm::StringMap<int64_t>()) {
   
   LoopTripCountResult result = analyzeScfForTripCount(forOp);
   
