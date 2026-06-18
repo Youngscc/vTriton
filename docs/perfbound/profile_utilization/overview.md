@@ -4,6 +4,8 @@
 
 注意：文档中的类名、字段名、函数名保持 Python 代码里的英文名字；解释文字使用中文。
 
+如果只想看瓶颈分析的判定逻辑和公式，请先读 [profile_utilization 瓶颈分析逻辑](bottleneck_logic.md)。
+
 ## 模块用途
 
 `profile_utilization.py` 用于在 component-based Roofline 基准值已经算出之后，结合 profiling 统计数据判断算子的性能瓶颈。

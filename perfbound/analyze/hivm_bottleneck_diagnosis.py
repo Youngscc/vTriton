@@ -131,6 +131,7 @@ def diagnose_hivm_bottleneck_from_des_ops(
     *,
     des_metadata: dict[int, dict] | None = None,
     input_warnings: list[str] | None = None,
+    ignored_pipes: set[str] | None = None,
     top_k: int = 10,
 ) -> HIVMBottleneckReport:
     """从已解析 DES graph 复现 HIVMBottleneckDiagnoser 的瓶颈诊断。
@@ -158,6 +159,7 @@ def diagnose_hivm_bottleneck_from_des_ops(
         metadata,
         warnings,
         warn_keys,
+        ignored_pipes=ignored_pipes,
     )
     pipeline = _diagnose_model_pipeline(summary)
     global_root = _diagnose_model_global(summary, pipeline)
@@ -171,6 +173,7 @@ def diagnose_hivm_bottleneck_from_des_ops(
         _diagnose_model_op(op, db, metadata, warnings, warn_keys)
         for op in operations
         if _model_op_duration(op, metadata, warnings, warn_keys) > _EPSILON
+        and (getattr(op, "pipe", "") or "Unknown") not in (ignored_pipes or set())
     ]
     op_diagnoses.sort(key=lambda item: item.actual_cycles, reverse=True)
 
@@ -269,6 +272,8 @@ def _summarize_model_operations(
     des_metadata: dict[int, dict],
     warnings: list[str],
     warn_keys: set[str],
+    *,
+    ignored_pipes: set[str] | None = None,
 ) -> dict:
     pipe_busy: dict[str, float] = defaultdict(float)
     weighted_pipe: dict[str, float] = defaultdict(float)
@@ -277,12 +282,17 @@ def _summarize_model_operations(
     barrier_cycles = 0.0
     one_iteration = 0.0
     global_barrier_weighted = 0.0
+    ignored = ignored_pipes or set()
 
     for op in operations:
         duration = _model_op_duration(op, des_metadata, warnings, warn_keys)
         end_cycle = _model_op_end_cycle(op, des_metadata, warnings, warn_keys)
         loop_multiplier = max(1.0, float(getattr(op, "loop_multiplier", 1) or 1))
         pipe = getattr(op, "pipe", "") or "Unknown"
+
+        if pipe in ignored:
+            one_iteration = max(one_iteration, end_cycle)
+            continue
 
         total_busy += duration
         one_iteration = max(one_iteration, end_cycle)

@@ -124,6 +124,8 @@ class OperatorBottleneckReport:
     dominant_share: float
     component_results: dict[str, ComponentUtilization] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    raw_elapsed_time_us: Optional[float] = None
+    excluded_scalar_time_us: Optional[float] = None
 
     # —— 对论文的补充：暴露控制/同步赤字的量化 ——
     # 仅当判定为 Insufficient Parallelism 且主导为暴露的 Scalar 控制时填充。
@@ -509,6 +511,8 @@ def run_from_files(
     work_tolerance: float = 0.10,
     t_bound_us: float | None = None,
     calibration_db: CalibrationDB | None = None,
+    ignore_scalar: bool = False,
+    exclude_scalar_time: bool = False,
 ) -> OperatorBottleneckReport:
     """从 op_summary、DES graph 和 calibration 文件端到端运行分析。
 
@@ -522,7 +526,7 @@ def run_from_files(
 
     op_row = _read_op_summary_row(op_summary_path, kernel_name)
     profile_name = kernel_name or _cell(op_row, "Op Name", "op_name", "Name") or "unknown"
-    elapsed_time_us = _float_cell(
+    raw_elapsed_time_us = _float_cell(
         op_row,
         "Task Duration(us)",
         "duration(us)",
@@ -546,6 +550,13 @@ def run_from_files(
             + _float_cell(op_row, "aiv_mte3_time(us)")
         ),
     }
+    scalar_control_time_us = active_time_us[Component.SCALAR]
+    elapsed_time_us = raw_elapsed_time_us
+    if exclude_scalar_time:
+        ignore_scalar = True
+        elapsed_time_us = max(raw_elapsed_time_us - scalar_control_time_us, _EPSILON)
+    if ignore_scalar:
+        active_time_us[Component.SCALAR] = 0.0
 
     des_metadata, des_input_warnings = read_des_graph_metadata(desgraph_path)
     extract = extract_hivm(desgraph_path)
@@ -557,6 +568,8 @@ def run_from_files(
 
     for op in extract.operations:
         comp = op.component
+        if ignore_scalar and comp == Component.SCALAR:
+            continue
         if comp in _COMPUTE_COMPONENTS:
             work = float(op.elements) * float(op.loop_multiplier)
             label = op.precision.value if op.precision else "unknown"
@@ -604,12 +617,26 @@ def run_from_files(
         r_threshold=r_threshold,
         work_tolerance=work_tolerance,
     )
+    if exclude_scalar_time:
+        report.raw_elapsed_time_us = raw_elapsed_time_us
+        report.excluded_scalar_time_us = scalar_control_time_us
+        report.warnings.append(
+            "已从 A/I/U/R/E 分母中临时扣除 scalar/control active time；"
+            "elapsed_time_us 为 effective elapsed，不是真实 kernel wall time"
+        )
     report.hivm_bottleneck = diagnose_hivm_bottleneck_from_des_ops(
         extract.operations,
         db,
         des_metadata=des_metadata,
         input_warnings=des_input_warnings,
+        ignored_pipes={"PIPE_S", "Scalar"} if ignore_scalar else None,
     )
+    if ignore_scalar and report.hivm_bottleneck is not None:
+        report.hivm_bottleneck.warnings = [
+            warning
+            for warning in report.hivm_bottleneck.warnings
+            if "startup_latency['scalar']" not in warning
+        ]
     report.warnings.extend(
         f"hivm_bottleneck: {warning}"
         for warning in report.hivm_bottleneck.warnings
@@ -648,6 +675,8 @@ def report_to_dict(report: OperatorBottleneckReport) -> dict:
     return {
         "kernel_name": report.kernel_name,
         "elapsed_time_us": report.elapsed_time_us,
+        "raw_elapsed_time_us": report.raw_elapsed_time_us,
+        "excluded_scalar_time_us": report.excluded_scalar_time_us,
         "diagnosis": report.diagnosis,
         "bound_kind": report.bound_kind,
         "dominant_component": (
@@ -1053,6 +1082,16 @@ def main(argv: list[str] | None = None) -> int:
         "deficit us estimate at author headroom (elapsed - t_bound_us).",
     )
     parser.add_argument(
+        "--ignore-scalar",
+        action="store_true",
+        help="Ignore scalar/control component and PIPE_S when selecting bottlenecks.",
+    )
+    parser.add_argument(
+        "--exclude-scalar-time",
+        action="store_true",
+        help="Use elapsed minus scalar/control active time as the A/I/U/R/E denominator.",
+    )
+    parser.add_argument(
         "--output-file",
         default="data/profile_utilization_inputs/profile_utilization_report.json",
         help="Path to write the JSON report",
@@ -1068,6 +1107,8 @@ def main(argv: list[str] | None = None) -> int:
         r_threshold=args.r_threshold,
         work_tolerance=args.work_tolerance,
         t_bound_us=args.t_bound_us,
+        ignore_scalar=args.ignore_scalar,
+        exclude_scalar_time=args.exclude_scalar_time,
     )
 
     output = json.dumps(report_to_dict(report), ensure_ascii=False, indent=2)
