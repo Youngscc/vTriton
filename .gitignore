@@ -19,6 +19,7 @@ cmake-build-*/
 *.inc
 *.h.inc
 *.cpp.inc
+data/profile_utilization_inputs/cases/real_data/
 
 # CMake
 CMakeCache.txt
