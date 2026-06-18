@@ -14,11 +14,14 @@ run_case() {
   local output_file="$4"
 
   echo "=== ${name} ==="
-  "${PYTHON_BIN}" -m perfbound.analyze.profile_utilization \
-    --op-summary "${op_summary}" \
-    --des-graph "${des_graph}" \
-    --calibration "${CALIBRATION}" \
-    --output-file "${output_file}"
+  PYTHONPATH="${ROOT_DIR}" "${PYTHON_BIN}" -c \
+    'import sys
+from scripts.demo_profile_utilization import run_profile_utilization_to_json
+run_profile_utilization_to_json(sys.argv[1], sys.argv[2], sys.argv[3], output_path=sys.argv[4])' \
+    "${op_summary}" \
+    "${des_graph}" \
+    "${CALIBRATION}" \
+    "${output_file}"
   echo "wrote ${output_file}"
   echo
 }

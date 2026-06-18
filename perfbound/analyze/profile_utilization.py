@@ -1,33 +1,28 @@
-"""根据 profiling 汇总信息计算实际 component 利用率。
+"""Run profile utilization bottleneck analysis from profiling and DES inputs.
 
-本文件用于把粗粒度 profiling 统计量和
-``perfbound.model.component_model`` 算出的理论 component floor 做对比。
-
-当前先假设输入已经是很简单的统计数据：每个 component 一行汇总。
-后续接入真实 msprof/CSV 时，可以另外加 parser，不需要改这里的计算公式。
+本模块只负责分析：读取 op_summary、DES graph 和 calibration，返回
+``OperatorBottleneckReport`` 诊断对象。JSON 序列化和屏幕展示放在 demo 层。
 """
 
 from __future__ import annotations
 
-import argparse
 import csv
-import json
 from dataclasses import dataclass, field
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Optional
 
 from ..calibration.calib_loader import load_calibration
-from ..calibration.constants import CalibrationDB, DType
+from ..calibration.constants import CalibrationDB
 from ..extract.hivm_extractor import extract_hivm
-from ..extract.op_classifier import Component, Precision
+from ..extract.op_classifier import Component
 from ..model.component_model import ComponentBound, compute_component_floor_from_db
 from .hivm_bottleneck_diagnosis import (
     HIVMBottleneckReport,
     diagnose_hivm_bottleneck_from_des_ops,
-    hivm_bottleneck_report_to_dict,
     read_des_graph_metadata,
 )
+from .rate_utils import cube_peak_rate_ops_per_us, vector_peak_rate_ops_per_us
 
 
 _EPSILON = 1e-12
@@ -39,6 +34,8 @@ _OVL_COMPUTE = {"PIPE_V", "PIPE_M"}
 _OVL_MEMORY = {"PIPE_MTE2_V", "PIPE_MTE2_C", "PIPE_MTE3", "PIPE_MTE1", "PIPE_FIX"}
 _OVL_CONTROL = {"PIPE_S", "PIPE_ALL"}
 _SYNC_OPS = {"wait_flag", "set_flag", "pipe_barrier", "sync_block_wait", "sync_block_set"}
+
+__all__ = ["run_from_files"]
 
 
 @dataclass
@@ -124,8 +121,6 @@ class OperatorBottleneckReport:
     dominant_share: float
     component_results: dict[str, ComponentUtilization] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
-    raw_elapsed_time_us: Optional[float] = None
-    excluded_scalar_time_us: Optional[float] = None
 
     # —— 对论文的补充：暴露控制/同步赤字的量化 ——
     # 仅当判定为 Insufficient Parallelism 且主导为暴露的 Scalar 控制时填充。
@@ -499,77 +494,40 @@ def _exposed_control_overlap(operations) -> tuple[float, int, int]:
     return exposed / critical_path, n_sync, critical_path
 
 
+def _active_times_from_op_summary(row: dict[str, str]) -> dict[Component, float]:
+    """Extract component active times from one op_summary row."""
 
-def run_from_files(
-    op_summary_path: str | Path,
-    desgraph_path: str | Path,
-    calibration_path: str | Path | None = None,
-    *,
-    kernel_name: str | None = None,
-    u_threshold: float = 0.80,
-    r_threshold: float = 0.50,
-    work_tolerance: float = 0.10,
-    t_bound_us: float | None = None,
-    calibration_db: CalibrationDB | None = None,
-    ignore_scalar: bool = False,
-    exclude_scalar_time: bool = False,
-) -> OperatorBottleneckReport:
-    """从 op_summary、DES graph 和 calibration 文件端到端运行分析。
-
-    ``t_bound_us`` 是该 kernel 的 sound 紧 bound（loop-scaled 两级调度 bound，
-    例如 46,109.91 µs），仅用于把暴露控制/同步赤字的 µs 估计封顶到 author
-    headroom (elapsed - t_bound_us)。注意：本模块自身的 component throughput
-    floor（compute_component_floor）只是吞吐下界，对 chunk_kda 这类非吞吐受限的
-    kernel 过松（~225 µs），不能用作 author headroom 的基准；DES 原始 makespan
-    又是 per-iteration（未 loop 放大）。因此紧 bound 必须由调用方提供，不提供时
-    deficit_pts 仍给出（与分母无关），但 deficit_us 留空。"""
-
-    op_row = _read_op_summary_row(op_summary_path, kernel_name)
-    profile_name = kernel_name or _cell(op_row, "Op Name", "op_name", "Name") or "unknown"
-    raw_elapsed_time_us = _float_cell(
-        op_row,
-        "Task Duration(us)",
-        "duration(us)",
-        "Duration(us)",
-        "duration_us",
-    )
-    active_time_us = {
-        Component.CUBE: _float_cell(op_row, "aic_mac_time(us)"),
-        Component.VECTOR: _float_cell(op_row, "aiv_vec_time(us)"),
+    return {
+        Component.CUBE: _float_cell(row, "aic_mac_time(us)"),
+        Component.VECTOR: _float_cell(row, "aiv_vec_time(us)"),
         Component.SCALAR: (
-            _float_cell(op_row, "aic_scalar_time(us)")
-            + _float_cell(op_row, "aiv_scalar_time(us)")
+            _float_cell(row, "aic_scalar_time(us)")
+            + _float_cell(row, "aiv_scalar_time(us)")
         ),
-        Component.MTE_L1: _float_cell(op_row, "aic_mte1_time(us)"),
+        Component.MTE_L1: _float_cell(row, "aic_mte1_time(us)"),
         Component.MTE_GM: (
-            _float_cell(op_row, "aic_mte2_time(us)")
-            + _float_cell(op_row, "aiv_mte2_time(us)")
+            _float_cell(row, "aic_mte2_time(us)")
+            + _float_cell(row, "aiv_mte2_time(us)")
         ),
         Component.MTE_UB: (
-            _float_cell(op_row, "aic_fixpipe_time(us)")
-            + _float_cell(op_row, "aiv_mte3_time(us)")
+            _float_cell(row, "aic_fixpipe_time(us)")
+            + _float_cell(row, "aiv_mte3_time(us)")
         ),
     }
-    scalar_control_time_us = active_time_us[Component.SCALAR]
-    elapsed_time_us = raw_elapsed_time_us
-    if exclude_scalar_time:
-        ignore_scalar = True
-        elapsed_time_us = max(raw_elapsed_time_us - scalar_control_time_us, _EPSILON)
-    if ignore_scalar:
-        active_time_us[Component.SCALAR] = 0.0
 
-    des_metadata, des_input_warnings = read_des_graph_metadata(desgraph_path)
-    extract = extract_hivm(desgraph_path)
-    db = calibration_db if calibration_db is not None else load_calibration(calibration_path)
-    component_bound = compute_component_floor_from_db(extract, db)
+
+def _component_stats_from_des_ops(
+    operations,
+    active_time_us: dict[Component, float],
+    db: CalibrationDB,
+) -> list[ProfileComponentStats]:
+    """Build component work and breakdown stats from extracted HIVM operations."""
 
     work_done: dict[Component, float] = defaultdict(float)
     breakdown: dict[Component, dict[str, float]] = defaultdict(lambda: defaultdict(float))
 
-    for op in extract.operations:
+    for op in operations:
         comp = op.component
-        if ignore_scalar and comp == Component.SCALAR:
-            continue
         if comp in _COMPUTE_COMPONENTS:
             work = float(op.elements) * float(op.loop_multiplier)
             label = op.precision.value if op.precision else "unknown"
@@ -604,11 +562,49 @@ def run_from_files(
                 work_breakdown=items,
             )
         )
+    return components
+
+
+def run_from_files(
+    op_summary_path: str | Path,
+    desgraph_path: str | Path,
+    calibration_path: str | Path | None = None,
+    *,
+    kernel_name: str | None = None,
+    u_threshold: float = 0.80,
+    r_threshold: float = 0.50,
+    work_tolerance: float = 0.10,
+    t_bound_us: float | None = None,
+    calibration_db: CalibrationDB | None = None,
+) -> OperatorBottleneckReport:
+    """从 op_summary、DES graph 和 calibration 文件端到端运行分析。
+
+    ``t_bound_us`` 是该 kernel 的 sound 紧 bound（loop-scaled 两级调度 bound，
+    例如 46,109.91 µs），仅用于把暴露控制/同步赤字的 µs 估计封顶到 author
+    headroom (elapsed - t_bound_us)。注意：本模块自身的 component throughput
+    floor（compute_component_floor）只是吞吐下界，对 chunk_kda 这类非吞吐受限的
+    kernel 过松（~225 µs），不能用作 author headroom 的基准；DES 原始 makespan
+    又是 per-iteration（未 loop 放大）。因此紧 bound 必须由调用方提供，不提供时
+    deficit_pts 仍给出（与分母无关），但 deficit_us 留空。"""
+
+    op_row = _read_op_summary_row(op_summary_path, kernel_name)
+    profile_name = kernel_name or _cell(op_row, "Op Name", "op_name", "Name") or "unknown"
+    elapsed_time_us = _row_duration_us(op_row)
+    active_time_us = _active_times_from_op_summary(op_row)
+
+    des_metadata, des_input_warnings = read_des_graph_metadata(desgraph_path)
+    extract = extract_hivm(desgraph_path)
+    db = calibration_db if calibration_db is not None else load_calibration(calibration_path)
+    component_bound = compute_component_floor_from_db(extract, db)
 
     profile = KernelProfileStats(
         kernel_name=profile_name,
         elapsed_time_us=elapsed_time_us,
-        components=components,
+        components=_component_stats_from_des_ops(
+            extract.operations,
+            active_time_us,
+            db,
+        ),
     )
     report = analyze_operator_bottleneck(
         profile,
@@ -617,348 +613,57 @@ def run_from_files(
         r_threshold=r_threshold,
         work_tolerance=work_tolerance,
     )
-    if exclude_scalar_time:
-        report.raw_elapsed_time_us = raw_elapsed_time_us
-        report.excluded_scalar_time_us = scalar_control_time_us
-        report.warnings.append(
-            "已从 A/I/U/R/E 分母中临时扣除 scalar/control active time；"
-            "elapsed_time_us 为 effective elapsed，不是真实 kernel wall time"
-        )
     report.hivm_bottleneck = diagnose_hivm_bottleneck_from_des_ops(
         extract.operations,
         db,
         des_metadata=des_metadata,
         input_warnings=des_input_warnings,
-        ignored_pipes={"PIPE_S", "Scalar"} if ignore_scalar else None,
     )
-    if ignore_scalar and report.hivm_bottleneck is not None:
-        report.hivm_bottleneck.warnings = [
-            warning
-            for warning in report.hivm_bottleneck.warnings
-            if "startup_latency['scalar']" not in warning
-        ]
     report.warnings.extend(
         f"hivm_bottleneck: {warning}"
         for warning in report.hivm_bottleneck.warnings
     )
 
-    # —— 对论文的补充：量化暴露控制/同步赤字 ——
-    # 当判定为暴露的 Scalar 控制导致的 Insufficient Parallelism 时，用 DES 调度的
-    # 暴露控制比例（模型）和同核实测 scalar 占比（aiv_scalar/aiv_time）求差，给出
-    # 定量赤字。两个分母都归一到单核时间线，匹配可比；µs 估计封顶到 author
-    # headroom (elapsed - t_core_floor)。纯诊断，不改变 bound。
-    if (
-        report.diagnosis == "Insufficient Parallelism"
-        and report.dominant_component == Component.SCALAR
-    ):
-        model_frac, n_sync, _ = _exposed_control_overlap(extract.operations)
-        aiv_time = _float_cell(op_row, "aiv_time(us)")
-        aiv_scalar = _float_cell(op_row, "aiv_scalar_time(us)")
-        measured_frac = aiv_scalar / aiv_time if aiv_time > _EPSILON else 0.0
-        report.exposed_control_frac_model = model_frac
-        report.exposed_control_frac_measured = measured_frac
-        report.exposed_control_deficit_pts = measured_frac - model_frac
-        report.n_sync_ops = n_sync
-        # µs 估计需要 sound 紧 bound 才能诚实封顶；只有调用方提供 t_bound_us 时才给。
-        if t_bound_us is not None:
-            author_headroom_us = elapsed_time_us - t_bound_us
-            if author_headroom_us > 0:
-                raw_us = max(0.0, measured_frac - model_frac) * elapsed_time_us
-                report.exposed_control_deficit_us = min(raw_us, author_headroom_us)
+    _attach_exposed_control_deficit(
+        report,
+        op_row,
+        extract.operations,
+        t_bound_us=t_bound_us,
+    )
 
     return report
 
 
-def report_to_dict(report: OperatorBottleneckReport) -> dict:
-    """把分析结果转成可 JSON 序列化的 dict。"""
-
-    return {
-        "kernel_name": report.kernel_name,
-        "elapsed_time_us": report.elapsed_time_us,
-        "raw_elapsed_time_us": report.raw_elapsed_time_us,
-        "excluded_scalar_time_us": report.excluded_scalar_time_us,
-        "diagnosis": report.diagnosis,
-        "bound_kind": report.bound_kind,
-        "dominant_component": (
-            report.dominant_component.value if report.dominant_component else None
-        ),
-        "dominant_item": report.dominant_item,
-        "dominant_share": report.dominant_share,
-        "exposed_control_frac_model": report.exposed_control_frac_model,
-        "exposed_control_frac_measured": report.exposed_control_frac_measured,
-        "exposed_control_deficit_pts": report.exposed_control_deficit_pts,
-        "exposed_control_deficit_us": report.exposed_control_deficit_us,
-        "n_sync_ops": report.n_sync_ops,
-        "hivm_bottleneck": hivm_bottleneck_report_to_dict(report.hivm_bottleneck),
-        "components": {
-            key: {
-                "component": result.component.value,
-                "work_done": result.work_done,
-                "bound_work": result.bound_work,
-                "elapsed_time_us": result.elapsed_time_us,
-                "active_time_us": result.active_time_us,
-                "actual_performance": result.actual_performance,
-                "ideal_performance": result.ideal_performance,
-                "u_utilization": result.u_utilization,
-                "r_residency": result.r_residency,
-                "e_efficiency": result.e_efficiency,
-                "dominant_item": result.dominant_item,
-                "dominant_share": result.dominant_share,
-                "warnings": result.warnings,
-            }
-            for key, result in report.component_results.items()
-        },
-        "warnings": report.warnings,
-    }
-
-
-def format_text_report(report: OperatorBottleneckReport) -> str:
-    """Format the complete report for stdout."""
-
-    parts = [_format_operator_bottleneck_report(report)]
-    if report.hivm_bottleneck is not None:
-        parts.append(_format_hivm_bottleneck_report(report.hivm_bottleneck))
-    return "\n".join(part.rstrip() for part in parts if part).rstrip() + "\n"
-
-
-def _format_operator_bottleneck_report(report: OperatorBottleneckReport) -> str:
-    dominant = (
-        report.component_results.get(report.dominant_component.value)
-        if report.dominant_component
-        else None
-    )
-    evidence_components = _operator_evidence_components(report, dominant)
-
-    lines = [
-        "=== Profile Utilization Diagnosis ===",
-        f"结论: {report.diagnosis}",
-        "证据:",
-        f"  - kernel={report.kernel_name}, elapsed={_fmt_us(report.elapsed_time_us)} us",
-    ]
-
-    if dominant is not None:
-        lines.append(
-            "  - 主导 component="
-            f"{dominant.component.value}, item={dominant.dominant_item or 'None'}, "
-            f"U={dominant.u_utilization * 100.0:.1f}%, "
-            f"R={dominant.r_residency * 100.0:.1f}%, "
-            f"E={dominant.e_efficiency * 100.0:.1f}%"
-        )
-    elif evidence_components:
-        max_r = max(item.r_residency for item in evidence_components)
-        lines.append(
-            "  - 没有 component 达到高驻留/高利用阈值；"
-            f"最高 R={max_r * 100.0:.1f}%"
-        )
-    else:
-        lines.append("  - 未找到可用于 A/I/U/R/E 分析的有效 component")
-
-    if report.exposed_control_frac_model is not None:
-        deficit_pts = (report.exposed_control_deficit_pts or 0.0) * 100.0
-        measured = (report.exposed_control_frac_measured or 0.0) * 100.0
-        model = report.exposed_control_frac_model * 100.0
-        lines.append(
-            "  - 暴露控制/同步: "
-            f"model={model:.1f}%, measured={measured:.1f}%, "
-            f"deficit={deficit_pts:.1f} pts, n_sync_ops={report.n_sync_ops}"
-        )
-        if report.exposed_control_deficit_us is not None:
-            lines.append(
-                f"  - 暴露控制/同步赤字约 {_fmt_us(report.exposed_control_deficit_us)} us"
-            )
-
-    lines.append("处理建议:")
-    for suggestion in _operator_suggestions(report):
-        lines.append(f"  -> {suggestion}")
-
-    if evidence_components:
-        lines.append("关键指标:")
-        for result in evidence_components[:3]:
-            lines.append(
-                "  - "
-                f"{result.component.value}: "
-                f"U={result.u_utilization * 100.0:.1f}%, "
-                f"R={result.r_residency * 100.0:.1f}%, "
-                f"E={result.e_efficiency * 100.0:.1f}%, "
-                f"active={_fmt_us(result.active_time_us)} us, "
-                f"work={_fmt_number(result.work_done)}"
-            )
-            if result.dominant_item:
-                lines[-1] += f", item={result.dominant_item}"
-
-    if report.warnings:
-        lines.append("Warnings:")
-        for warning in report.warnings:
-            lines.append(f"  - {warning}")
-
-    return "\n".join(lines)
-
-
-def _operator_evidence_components(
+def _attach_exposed_control_deficit(
     report: OperatorBottleneckReport,
-    dominant: ComponentUtilization | None,
-) -> list[ComponentUtilization]:
-    if dominant is not None:
-        return [dominant]
-    return sorted(
-        report.component_results.values(),
-        key=lambda item: (
-            item.r_residency,
-            item.u_utilization,
-            item.active_time_us,
-        ),
-        reverse=True,
-    )
+    op_row: dict[str, str],
+    operations,
+    *,
+    t_bound_us: float | None,
+) -> None:
+    """Attach diagnostic-only exposed control/sync deficit metrics."""
 
+    if (
+        report.diagnosis != "Insufficient Parallelism"
+        or report.dominant_component != Component.SCALAR
+    ):
+        return
 
-def _operator_suggestions(report: OperatorBottleneckReport) -> list[str]:
-    diagnosis = report.diagnosis
-    if diagnosis == "Compute Bound":
-        return [
-            "计算侧已接近理论 ceiling；优先减少计算量、调整精度或提升 arithmetic intensity",
-            "检查 tile/MN/K 形状和算子融合，避免额外启动和同步开销",
-        ]
-    if diagnosis == "MTE Bound":
-        return [
-            "数据搬运侧已接近理论 ceiling；优先减少 bytes 或增加片上复用",
-            "用 multi-buffer/software pipeline 让搬运与计算重叠",
-        ]
-    if diagnosis == "Inefficient Compute":
-        return [
-            "计算单元驻留较高但效率低；检查 vector/cube 指令形态、mask/repeat 和 tile 是否过小",
-            "对照 DES 中主导 compute op，优先处理高 R 低 E 的 component",
-        ]
-    if diagnosis == "Inefficient MTE":
-        return [
-            "MTE 驻留较高但有效带宽低；检查传输路径、对齐、burst/packet size 和 tile 粒度",
-            "合并小搬运或提高 reuse，减少单位有效 bytes 的启动成本",
-        ]
-    if diagnosis == "Insufficient Parallelism":
-        suggestions = [
-            "整体驻留不足；优先增加 pipeline depth、multi-buffer 或并行 tile 数",
-            "结合 HIVM Bottleneck Diagnosis 查看是 pipe 不均衡、同步等待还是全局 barrier 导致",
-        ]
-        if report.dominant_component == Component.SCALAR:
-            suggestions.insert(
-                0,
-                "高驻留但无 work 的 Scalar 指向暴露控制/同步；优先减少 barrier/wait 或让控制与计算/搬运重叠",
-            )
-        return suggestions
-    if diagnosis == "Insufficient Data":
-        return [
-            "补齐 op_summary、DES work 和 calibration 后再判断",
-            "检查 elapsed_time、active_time、bytes/flops/elements 的单位是否一致",
-        ]
-    return [
-        "检查主导 component 的 U/R/E，并结合 HIVM 结构诊断定位下一步优化方向",
-    ]
+    model_frac, n_sync, _ = _exposed_control_overlap(operations)
+    aiv_time = _float_cell(op_row, "aiv_time(us)")
+    aiv_scalar = _float_cell(op_row, "aiv_scalar_time(us)")
+    measured_frac = aiv_scalar / aiv_time if aiv_time > _EPSILON else 0.0
+    report.exposed_control_frac_model = model_frac
+    report.exposed_control_frac_measured = measured_frac
+    report.exposed_control_deficit_pts = measured_frac - model_frac
+    report.n_sync_ops = n_sync
 
-
-def _format_hivm_bottleneck_report(report: HIVMBottleneckReport) -> str:
-    """Format PR17 diagnosis like HIVMBottleneckReport::print()."""
-
-    lines = [
-        "",
-        "=== Bottleneck Diagnosis ===",
-        f"Global root cause: {report.global_root_cause}",
-        f"  Evidence: {report.global_evidence}",
-        f"  {report.global_explanation}",
-    ]
-    for suggestion in report.global_suggestions:
-        lines.append(f"  -> {suggestion}")
-
-    lines.extend(
-        [
-            "",
-            "Sync/barrier overhead (from syncCycles/barrierCycles/oneIterationCycles):",
-            "  syncCycles/oneIterationCycles = "
-            f"{report.sync_overhead_ratio:.1f}%",
-            "  barrierCycles/oneIterationCycles = "
-            f"{report.barrier_overhead_ratio:.1f}%",
-            "",
-            "Pipeline diagnosis:",
-        ]
-    )
-
-    pipeline = report.pipeline_diagnosis
-    if pipeline is None:
-        lines.extend(
-            [
-                "  Evidence: ",
-                "  Bottleneck pipe: Unknown",
-                "  Imbalance ratio (weightedPipeCycles max/min): 0.0x",
-                "  Insufficient data to determine pipeline root cause",
-            ]
-        )
-    else:
-        lines.extend(
-            [
-                f"  Evidence: {pipeline.evidence}",
-                f"  Bottleneck pipe: {pipeline.bottleneck_pipe}",
-                "  Imbalance ratio (weightedPipeCycles max/min): "
-                f"{pipeline.imbalance_ratio:.1f}x",
-                f"  {pipeline.explanation}",
-            ]
-        )
-        for suggestion in pipeline.suggestions:
-            lines.append(f"  -> {suggestion}")
-
-    sorted_ops = sorted(
-        (
-            diag
-            for diag in report.op_diagnoses
-            if diag.root_cause != "SyncOverhead"
-        ),
-        key=lambda item: item.actual_cycles,
-        reverse=True,
-    )
-    limit = min(10, len(sorted_ops))
-    lines.append("")
-    lines.append(
-        f"Per-op diagnosis (top {limit} by duration, excluding sync ops):"
-    )
-    for diag in sorted_ops[:limit]:
-        lines.extend(
-            [
-                "  line "
-                f"{diag.line_number} {diag.op_name} [{diag.pipe}]: "
-                f"{diag.root_cause}",
-                f"    Evidence: {diag.evidence}",
-                f"    {diag.explanation}",
-                "    duration="
-                f"{_fmt_cycles(diag.actual_cycles)} cyc, theoretical_min="
-                f"{_fmt_cycles(diag.theoretical_min_cycles)} cyc, overhead="
-                f"{diag.overhead_ratio * 100.0:.1f}%",
-            ]
-        )
-        for suggestion in diag.suggestions:
-            lines.append(f"    -> {suggestion}")
-
-    if report.warnings:
-        lines.append("")
-        lines.append("Warnings:")
-        for warning in report.warnings:
-            lines.append(f"  - {warning}")
-
-    return "\n".join(lines)
-
-
-def _fmt_number(value: float) -> str:
-    if abs(value) >= 1000.0:
-        return f"{value:.0f}"
-    return f"{value:.6g}"
-
-
-def _fmt_us(value: float) -> str:
-    if abs(value) >= 100.0:
-        return f"{value:.3f}".rstrip("0").rstrip(".")
-    return f"{value:.6g}"
-
-
-def _fmt_cycles(value: float) -> str:
-    if abs(value - round(value)) < 1e-9:
-        return str(int(round(value)))
-    return f"{value:.3f}".rstrip("0").rstrip(".")
+    if t_bound_us is None:
+        return
+    author_headroom_us = report.elapsed_time_us - t_bound_us
+    if author_headroom_us > 0:
+        raw_us = max(0.0, measured_frac - model_frac) * report.elapsed_time_us
+        report.exposed_control_deficit_us = min(raw_us, author_headroom_us)
 
 
 def _row_duration_us(row: dict[str, str]) -> float:
@@ -1027,9 +732,9 @@ def _peak_rate_for_label(
     db: CalibrationDB,
 ) -> float:
     if component == Component.CUBE:
-        return _cube_peak_rate(label, db)
+        return cube_peak_rate_ops_per_us(label, db)
     if component == Component.VECTOR:
-        return _vector_peak_rate(label, db)
+        return vector_peak_rate_ops_per_us(label, db)
     if component in _MTE_COMPONENTS:
         src, sep, dst = label.partition("->")
         if not sep:
@@ -1040,83 +745,3 @@ def _peak_rate_for_label(
         except KeyError:
             return 0.0
     return 0.0
-
-
-def _cube_peak_rate(label: str, db: CalibrationDB) -> float:
-    try:
-        dtype = DType.from_str(label)
-    except KeyError:
-        return 0.0
-    tflops = db.cube.throughput.get(dtype, 0.0)
-    return tflops * 1e6 if tflops > 0 else 0.0
-
-
-def _vector_peak_rate(label: str, db: CalibrationDB) -> float:
-    try:
-        precision = Precision(label)
-    except ValueError:
-        return 0.0
-    if precision in (Precision.FP16, Precision.BF16):
-        tflops = db.vector.throughput_fp16_tflops
-    else:
-        tflops = db.vector.throughput_fp32_tflops
-    return tflops * 1e6 if tflops > 0 else 0.0
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Run profile utilization analysis from op_summary, DES graph, and calibration files."
-    )
-    parser.add_argument("--op-summary", required=True, help="Path to msprof op_summary CSV")
-    parser.add_argument("--des-graph", required=True, help="Path to tritonsim-hivm DES graph JSON")
-    parser.add_argument("--calibration", help="Path to calibration JSON; defaults to calib_910b3_v1.json")
-    parser.add_argument("--kernel-name", help="Optional Op Name to select from op_summary")
-    parser.add_argument("--u-threshold", type=float, default=0.80)
-    parser.add_argument("--r-threshold", type=float, default=0.50)
-    parser.add_argument("--work-tolerance", type=float, default=0.10)
-    parser.add_argument(
-        "--t-bound-us",
-        type=float,
-        default=None,
-        help="Sound loop-scaled bound (us) used only to cap the exposed-control "
-        "deficit us estimate at author headroom (elapsed - t_bound_us).",
-    )
-    parser.add_argument(
-        "--ignore-scalar",
-        action="store_true",
-        help="Ignore scalar/control component and PIPE_S when selecting bottlenecks.",
-    )
-    parser.add_argument(
-        "--exclude-scalar-time",
-        action="store_true",
-        help="Use elapsed minus scalar/control active time as the A/I/U/R/E denominator.",
-    )
-    parser.add_argument(
-        "--output-file",
-        default="data/profile_utilization_inputs/profile_utilization_report.json",
-        help="Path to write the JSON report",
-    )
-    args = parser.parse_args(argv)
-
-    report = run_from_files(
-        args.op_summary,
-        args.des_graph,
-        args.calibration,
-        kernel_name=args.kernel_name,
-        u_threshold=args.u_threshold,
-        r_threshold=args.r_threshold,
-        work_tolerance=args.work_tolerance,
-        t_bound_us=args.t_bound_us,
-        ignore_scalar=args.ignore_scalar,
-        exclude_scalar_time=args.exclude_scalar_time,
-    )
-
-    output = json.dumps(report_to_dict(report), ensure_ascii=False, indent=2)
-    Path(args.output_file).write_text(output + "\n")
-    print(format_text_report(report), end="")
-    print(f"\nJSON report: {args.output_file}")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

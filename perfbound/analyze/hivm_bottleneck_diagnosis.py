@@ -12,7 +12,8 @@ from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from ..calibration.constants import CalibrationDB, DType
+from ..calibration.constants import CalibrationDB
+from .rate_utils import cube_peak_rate_ops_per_us, vector_peak_rate_ops_per_us
 
 
 _EPSILON = 1e-12
@@ -637,9 +638,9 @@ def _model_compute_ops_per_cycle(
 ) -> float:
     precision = getattr(getattr(op, "precision", None), "value", "") or "fp16"
     if getattr(op, "pipe", "") in {"PIPE_M", "Cube"}:
-        rate_us = _cube_peak_rate(precision, db)
+        rate_us = cube_peak_rate_ops_per_us(precision, db)
     else:
-        rate_us = _vector_peak_rate(precision, db)
+        rate_us = vector_peak_rate_ops_per_us(precision, db, unknown_as_fp16=True)
     if rate_us <= _EPSILON:
         _warn_once(
             warnings,
@@ -776,27 +777,6 @@ def _model_op_is_barrier(op, des_metadata: dict[int, dict]) -> bool:
         getattr(op, "op_name", "") in {"pipe_barrier", "sync_block_wait"}
         or getattr(op, "pipe", "") in _ALL_PIPES
     )
-
-
-def _cube_peak_rate(label: str, db: CalibrationDB) -> float:
-    try:
-        dtype = DType.from_str(label)
-    except KeyError:
-        return 0.0
-    tflops = db.cube.throughput.get(dtype, 0.0)
-    return tflops * 1e6 if tflops > 0 else 0.0
-
-
-def _vector_peak_rate(label: str, db: CalibrationDB) -> float:
-    try:
-        dtype = DType.from_str(label)
-    except KeyError:
-        dtype = DType.FP16
-    if dtype in (DType.FP16, DType.BF16):
-        tflops = db.vector.throughput_fp16_tflops
-    else:
-        tflops = db.vector.throughput_fp32_tflops
-    return tflops * 1e6 if tflops > 0 else 0.0
 
 
 def _safe_ratio(num: float, den: float) -> float:

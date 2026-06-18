@@ -10,89 +10,146 @@ import textwrap
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-from perfbound.analyze.profile_utilization import report_to_dict, run_from_files
+from perfbound.analyze.hivm_bottleneck_diagnosis import hivm_bottleneck_report_to_dict
+from perfbound.analyze.profile_utilization import OperatorBottleneckReport, run_from_files
 from perfbound.calibration.calib_loader import DEFAULT_CALIB_PATH
 
 
 ROOT = Path(__file__).parents[1]
 REPORT_WIDTH = 88
 INPUT_DIR = ROOT / "data" / "profile_utilization_inputs"
-OP_SUMMARY = INPUT_DIR / "op_summary_fake.csv"
-DES_GRAPH = INPUT_DIR / "des_fake.json"
 CALIBRATION = DEFAULT_CALIB_PATH
-OUTPUT_FILE = INPUT_DIR / "profile_utilization_report.json"
 CASE_DIR = INPUT_DIR / "cases"
-IGNORE_SCALAR = True
-EXCLUDE_SCALAR_CONTROL_TIME = True
+ACTIVE_CASE = "real_data"
 SHOW_WARNINGS = False
 KERNEL_DISPLAY_NAMES = {
     "chunk_kda_bwd_kernel_wy_dqkg_fused_opt_v2": (
         "Chunk KDA backward fused kernel (dq/dk/dg/db/dA)"
     ),
 }
-DEMO_CASES = [
-    # ("default_fake", OP_SUMMARY, DES_GRAPH, OUTPUT_FILE),
-    # (
-    #     "compute_bound",
-    #     CASE_DIR / "compute_bound" / "op_summary.csv",
-    #     CASE_DIR / "compute_bound" / "des.json",
-    #     CASE_DIR / "compute_bound" / "profile_utilization_report.json",
-    # ),
-    # (
-    #     "inefficient_compute",
-    #     CASE_DIR / "inefficient_compute" / "op_summary.csv",
-    #     CASE_DIR / "inefficient_compute" / "des.json",
-    #     CASE_DIR / "inefficient_compute" / "profile_utilization_report.json",
-    # ),
-    (
-        "real_data",
+DEMO_CASES: dict[str, tuple[Path, Path, Path]] = {
+    "default_fake": (
+        INPUT_DIR / "op_summary_fake.csv",
+        INPUT_DIR / "des_fake.json",
+        INPUT_DIR / "profile_utilization_report.json",
+    ),
+    "compute_bound": (
+        CASE_DIR / "compute_bound" / "op_summary.csv",
+        CASE_DIR / "compute_bound" / "des.json",
+        CASE_DIR / "compute_bound" / "profile_utilization_report.json",
+    ),
+    "inefficient_compute": (
+        CASE_DIR / "inefficient_compute" / "op_summary.csv",
+        CASE_DIR / "inefficient_compute" / "des.json",
+        CASE_DIR / "inefficient_compute" / "profile_utilization_report.json",
+    ),
+    "inefficient_mte": (
+        CASE_DIR / "inefficient_mte" / "op_summary.csv",
+        CASE_DIR / "inefficient_mte" / "des.json",
+        CASE_DIR / "inefficient_mte" / "profile_utilization_report.json",
+    ),
+    "insufficient_parallelism": (
+        CASE_DIR / "insufficient_parallelism" / "op_summary.csv",
+        CASE_DIR / "insufficient_parallelism" / "des.json",
+        CASE_DIR / "insufficient_parallelism" / "profile_utilization_report.json",
+    ),
+    "sync_overhead": (
+        CASE_DIR / "sync_overhead" / "op_summary.csv",
+        CASE_DIR / "sync_overhead" / "des.json",
+        CASE_DIR / "sync_overhead" / "profile_utilization_report.json",
+    ),
+    "real_data": (
         CASE_DIR / "real_data" / "op_summary_20260610082013.csv",
         CASE_DIR / "real_data" / "des_graph.json",
         CASE_DIR / "real_data" / "profile_utilization_report.json",
     ),
-    # (
-    #     "inefficient_mte",
-    #     CASE_DIR / "inefficient_mte" / "op_summary.csv",
-    #     CASE_DIR / "inefficient_mte" / "des.json",
-    #     CASE_DIR / "inefficient_mte" / "profile_utilization_report.json",
-    # ),
-    # (
-    #     "insufficient_parallelism",
-    #     CASE_DIR / "insufficient_parallelism" / "op_summary.csv",
-    #     CASE_DIR / "insufficient_parallelism" / "des.json",
-    #     CASE_DIR / "insufficient_parallelism" / "profile_utilization_report.json",
-    # ),
-    # (
-    #     "sync_overhead",
-    #     CASE_DIR / "sync_overhead" / "op_summary.csv",
-    #     CASE_DIR / "sync_overhead" / "des.json",
-    #     CASE_DIR / "sync_overhead" / "profile_utilization_report.json",
-    # ),
-]
+}
 
 
 def main() -> None:
-    print(_box_top())
-    print(_box_line("profile_utilization end-to-end demo"))
-    print(_box_line(f"Calibration: {_rel(CALIBRATION)}"))
-    print(_box_line(f"Scalar: {'ignored' if IGNORE_SCALAR else 'included'}"))
-    print(_box_line(f"Scalar/control time: {'excluded from AIURE' if EXCLUDE_SCALAR_CONTROL_TIME else 'included'}"))
-    print(_box_line(f"Warnings: {'shown' if SHOW_WARNINGS else 'hidden'}"))
-    print(_box_line(f"Cases: {len(DEMO_CASES)}"))
-    print(_box_bottom())
-    print()
+    op_summary, des_graph, output_file = _active_case_paths()
+    payload = run_profile_utilization_to_json(
+        op_summary,
+        des_graph,
+        CALIBRATION,
+        output_path=output_file,
+    )
+    _print_report_summary(ACTIVE_CASE, payload, op_summary, des_graph, output_file)
 
-    for name, op_summary, des_graph, output_file in DEMO_CASES:
-        report = run_from_files(
-            op_summary,
-            des_graph,
-            CALIBRATION,
-            ignore_scalar=IGNORE_SCALAR,
-            exclude_scalar_time=EXCLUDE_SCALAR_CONTROL_TIME,
+
+def _active_case_paths() -> tuple[Path, Path, Path]:
+    try:
+        return DEMO_CASES[ACTIVE_CASE]
+    except KeyError as exc:
+        choices = ", ".join(sorted(DEMO_CASES))
+        raise SystemExit(
+            f"Unknown ACTIVE_CASE={ACTIVE_CASE!r}. Available cases: {choices}"
+        ) from exc
+
+
+def run_profile_utilization_to_json(
+    op_summary_path: str | Path,
+    desgraph_path: str | Path,
+    calibration_path: str | Path | None = None,
+    *,
+    output_path: str | Path | None = None,
+    **kwargs,
+) -> dict:
+    """Run analysis and convert the result object to a JSON-ready report."""
+
+    report = run_from_files(
+        op_summary_path,
+        desgraph_path,
+        calibration_path,
+        **kwargs,
+    )
+    payload = report_to_dict(report)
+    if output_path is not None:
+        Path(output_path).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
         )
-        payload = report_to_dict(report)
-        output_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
-        _print_report_summary(name, payload, op_summary, des_graph, output_file)
+    return payload
+
+
+def report_to_dict(report: OperatorBottleneckReport) -> dict:
+    """把分析结果对象转成可 JSON 序列化的 dict。"""
+
+    return {
+        "kernel_name": report.kernel_name,
+        "elapsed_time_us": report.elapsed_time_us,
+        "diagnosis": report.diagnosis,
+        "bound_kind": report.bound_kind,
+        "dominant_component": (
+            report.dominant_component.value if report.dominant_component else None
+        ),
+        "dominant_item": report.dominant_item,
+        "dominant_share": report.dominant_share,
+        "exposed_control_frac_model": report.exposed_control_frac_model,
+        "exposed_control_frac_measured": report.exposed_control_frac_measured,
+        "exposed_control_deficit_pts": report.exposed_control_deficit_pts,
+        "exposed_control_deficit_us": report.exposed_control_deficit_us,
+        "n_sync_ops": report.n_sync_ops,
+        "hivm_bottleneck": hivm_bottleneck_report_to_dict(report.hivm_bottleneck),
+        "components": {
+            key: {
+                "component": result.component.value,
+                "work_done": result.work_done,
+                "bound_work": result.bound_work,
+                "elapsed_time_us": result.elapsed_time_us,
+                "active_time_us": result.active_time_us,
+                "actual_performance": result.actual_performance,
+                "ideal_performance": result.ideal_performance,
+                "u_utilization": result.u_utilization,
+                "r_residency": result.r_residency,
+                "e_efficiency": result.e_efficiency,
+                "dominant_item": result.dominant_item,
+                "dominant_share": result.dominant_share,
+                "warnings": result.warnings,
+            }
+            for key, result in report.component_results.items()
+        },
+        "warnings": report.warnings,
+    }
 
 
 def _print_report_summary(
@@ -219,8 +276,6 @@ def _print_case_card(
     kernel = report.get("kernel_name", "-")
     op_name = _display_kernel_name(kernel)
     elapsed = _fmt_us(report.get("elapsed_time_us"))
-    raw_elapsed = report.get("raw_elapsed_time_us")
-    excluded_scalar = report.get("excluded_scalar_time_us")
 
     print(_box_top())
     print(_box_line(f"CASE   {name}"))
@@ -228,16 +283,7 @@ def _print_case_card(
     print(_box_line(f"CHECK  {first_check}"))
     print(_box_line(f"OP     {op_name}"))
     print(_box_line(f"KERNEL {kernel}"))
-    if raw_elapsed not in (None, ""):
-        print(
-            _box_line(
-                f"TIME   {elapsed} effective    RAW {_fmt_us(raw_elapsed)}"
-            )
-        )
-        print(_box_line(f"DROP   scalar/control {_fmt_us(excluded_scalar)}"))
-        print(_box_line(f"OUTPUT {_rel(output_file)}"))
-    else:
-        print(_box_line(f"TIME   {elapsed}    OUTPUT {_rel(output_file)}"))
+    print(_box_line(f"TIME   {elapsed}    OUTPUT {_rel(output_file)}"))
     print(_box_bottom())
 
 
