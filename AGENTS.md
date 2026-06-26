@@ -28,7 +28,8 @@ Keep project documentation grounded in repository code, configs, tests, and trac
 - `test/`: MLIR/Triton smoke inputs and benchmark scripts.
 - `tests/`: pytest-based validation suite.
 - `data/`: profiling/demo input data, sample CSV/JSON artifacts, and generated example reports.
-- `docs/`: long-lived project documentation. Topic-specific documents may live under subdirectories such as `docs/perfbound/profile_utilization/`.
+- `docs/`: human-facing project documentation. Topic-specific documents may live under subdirectories such as `docs/perfbound/profile_utilization/`.
+- `.agent/`: AI/agent-facing project context, architecture notes, terminology, decisions, known issues, and implementation status.
 - `.omc/`: project specs, plans, progress logs, and paper/model design notes.
 - `thirdparty/`: vendored upstream dependencies; treat as external unless a task explicitly targets them.
 
@@ -123,19 +124,19 @@ Before handing off a substantial change:
 2. Run targeted syntax/build/test commands appropriate to the touched files.
 3. Update docs when behavior, architecture, report format, data schema, or user workflow changes.
 4. Do not claim hardware validation unless the relevant hardware-dependent command actually ran successfully.
-5. Record unresolved issues in `docs/known-issues.md` when they are durable rather than one-off debugging notes.
+5. Record unresolved issues in `.agent/known-issues.md` when they are durable rather than one-off debugging notes.
 
 
 ## Project Documentation Usage
 
 Read only the project documents relevant to the current task:
 
-- Read `docs/project-context.md` when determining project goals, scope, or intended behavior.
-- Read `docs/architecture.md` for cross-module changes, data-flow changes, or new entrypoints.
-- Read `docs/terminology.md` when implementing or modifying domain concepts, metrics, or units.
-- Read `docs/decisions.md` before changing an established design or architectural convention.
-- Read `docs/known-issues.md` when debugging related functionality or working around known limitations.
-- Read `docs/implementation-status.md` when planning work or determining whether a feature is complete.
+- Read `.agent/project-context.md` when determining project goals, scope, or intended behavior.
+- Read `.agent/architecture.md` for cross-module changes, data-flow changes, or new entrypoints.
+- Read `.agent/terminology.md` when implementing or modifying domain concepts, metrics, or units.
+- Read `.agent/decisions.md` before changing an established design or architectural convention.
+- Read `.agent/known-issues.md` when debugging related functionality or working around known limitations.
+- Read `.agent/implementation-status.md` when planning work or determining whether a feature is complete.
 
 Do not read or rewrite every project document for small, localized tasks.
 Use source code, tests, configuration, and verified specifications as the final source of truth.
@@ -143,10 +144,10 @@ Use source code, tests, configuration, and verified specifications as the final 
 ## Documentation Maintenance Rules
 Every time a substantive development task is completed:
 
-1. Check whether `docs/implementation-status.md` needs an update.
-2. Add or update `docs/decisions.md` when a long-lived design decision is introduced or changed.
-3. Add or update `docs/known-issues.md` when an unresolved problem, limitation, missing test, or environment dependency is discovered.
-4. Update `docs/architecture.md` when module boundaries, data flow, or entrypoints change.
+1. Check whether `.agent/implementation-status.md` needs an update.
+2. Add or update `.agent/decisions.md` when a long-lived design decision is introduced or changed.
+3. Add or update `.agent/known-issues.md` when an unresolved problem, limitation, missing test, or environment dependency is discovered.
+4. Update `.agent/architecture.md` when module boundaries, data flow, or entrypoints change.
 5. Update `AGENTS.md` when long-term project rules change.
 6. Do not put temporary progress, one-off debugging traces, or task-local notes in `AGENTS.md`.
 
@@ -163,7 +164,7 @@ When working on a task:
 3. Determine whether the code or documentation is outdated.
 4. Update the relevant documentation when the correct behavior can be confirmed.
 5. If the correct behavior cannot be confirmed, record the conflict in
-   `docs/known-issues.md` and mark it as `待确认`.
+   `.agent/known-issues.md` and mark it as `待确认`.
 6. Never preserve an existing statement only because it already appears in the
    documentation.
 

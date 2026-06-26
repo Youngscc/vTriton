@@ -124,6 +124,14 @@ The comparison flow is:
 7. Attach HIVM model diagnosis and optional exposed control/sync deficit
    fields as diagnostic evidence.
 
+`run_from_files(ignore_scalar=True)` creates a Compute/MTE-only diagnostic view:
+DES operations classified as `Component.SCALAR` and the Scalar active-time
+component are excluded from component/HIVM diagnosis. Measured kernel elapsed
+time remains unchanged because component active times can overlap and therefore
+cannot be subtracted from wall-clock duration. The option does not reschedule or
+compact DES timestamps, so dependency gaps visible between remaining operations
+are preserved.
+
 ### Kernel, Operator, Component Relationship
 
 The code uses these levels in the profiling path:

@@ -20,7 +20,8 @@ REPORT_WIDTH = 88
 INPUT_DIR = ROOT / "data" / "profile_utilization_inputs"
 CALIBRATION = DEFAULT_CALIB_PATH
 CASE_DIR = INPUT_DIR / "cases"
-ACTIVE_CASE = "real_data"
+ACTIVE_CASE = "real_data_2"
+IGNORE_SCALAR = True
 SHOW_WARNINGS = False
 KERNEL_DISPLAY_NAMES = {
     "chunk_kda_bwd_kernel_wy_dqkg_fused_opt_v2": (
@@ -63,6 +64,11 @@ DEMO_CASES: dict[str, tuple[Path, Path, Path]] = {
         CASE_DIR / "real_data" / "des_graph.json",
         CASE_DIR / "real_data" / "profile_utilization_report.json",
     ),
+    "real_data_2": (
+        CASE_DIR / "real_data_2" / "op_summary_20260610082013.csv",
+        CASE_DIR / "real_data_2" / "chunk_des.json",
+        CASE_DIR / "real_data_2" / "profile_utilization_report.json",
+    ),
 }
 
 
@@ -73,6 +79,7 @@ def main() -> None:
         des_graph,
         CALIBRATION,
         output_path=output_file,
+        ignore_scalar=IGNORE_SCALAR,
     )
     _print_report_summary(ACTIVE_CASE, payload, op_summary, des_graph, output_file)
 
@@ -124,6 +131,7 @@ def report_to_dict(report: OperatorBottleneckReport) -> dict:
         ),
         "dominant_item": report.dominant_item,
         "dominant_share": report.dominant_share,
+        "ignore_scalar": report.ignore_scalar,
         "exposed_control_frac_model": report.exposed_control_frac_model,
         "exposed_control_frac_measured": report.exposed_control_frac_measured,
         "exposed_control_deficit_pts": report.exposed_control_deficit_pts,
@@ -210,6 +218,12 @@ def _print_report_summary(
         print()
 
     _print_section("i", "Inputs")
+    mode = (
+        "Compute/MTE only (Scalar ignored)"
+        if report.get("ignore_scalar")
+        else "All components"
+    )
+    print(f"mode      : {mode}")
     print(f"op_summary: {_rel(op_summary)}")
     print(f"des_graph : {_rel(des_graph)}")
     print()

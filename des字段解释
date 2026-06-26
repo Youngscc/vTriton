@@ -1,0 +1,125 @@
+# des_graph.json 字段含义详解
+
+des_graph.json 是 C++ 端 `HIVMAnalysis::emitDESGraph()` 导出的 **HIVM（华为中间虚拟机）调度图**，描述一个 kernel 在单个 AI Core 上的完整指令调度。文件由 C++ 侧发射、Python 侧 `perfbound/extract/hivm_extractor.py` 消费。
+
+## 一、顶层字段
+
+| 字段 | 类型 | 取值示例 | 含义 |
+|------|------|----------|------|
+| `schema_version` | string | `"a3_hivm_des_v1"` | DES 图的 schema 版本号，用于版本兼容性校验 |
+| `schedule_truncated` | bool | `false` | 调度是否被截断。若为 `true`，`load_hivm_desgraph` 会**拒绝加载**，因为 bound 会无效 |
+| `clock_ghz` | float | `1.850` | AI Core 时钟频率（GHz），用于 cycle ↔ µs 换算。1.85 GHz 即每 cycle ≈ 0.54 ns |
+| `operations` | array | `[...]` | 操作列表，每个元素是一条 HIVM 指令的调度记录 |
+
+## 二、operations 数组中每个 op 的字段
+
+以第一条为例：
+
+```json
+{"id":0,"name":"constant","pipe":"PIPE_S","duration":1,"start_cycle":0,"end_cycle":1,"line":55,"depends_on":[],"is_sync":false,"is_barrier":false,"event_id":"","event_generation":0,"sender_pipe":"PIPE_UNKNOWN","receiver_pipe":"PIPE_UNKNOWN","core_type":"CUBE","bytes":0,"elements":0,"flops":0,"loop_multiplier":1,"multi_buffer_slots":1,"read_buffers":[],"write_buffers":[],"read_versions":[],"write_versions":[],"src_space":"","dst_space":"","elem_type":"","repeat":1,"mask":0}
+```
+
+### 1. 标识与分类字段
+
+| 字段 | 类型 | 取值示例 | 含义 |
+|------|------|----------|------|
+| `id` | int | `0` | 操作的唯一 ID，被其他 op 的 `depends_on` 引用，构建 DAG |
+| `name` | string | `"constant"`, `"muli"`, `"load"`, `"mmadL1"` | HIVM 指令名（LLVM 风格），如 `muli`=整数乘、`trunci`=截断、`load`=加载、`mmadL1`=Cube 矩阵乘 |
+| `pipe` | string | `"PIPE_S"`, `"PIPE_V"`, `"PIPE_MTE2_V"` | **HIVM 流水线归属**，决定 op 跑在哪个硬件单元。详见下方 pipe 取值表 |
+| `line` | int | `55` | 该 op 对应源码行号（.npuir.mlir 中的行），用于 op 级诊断定位 |
+| `core_type` | string | `"CUBE"`, `"AIV"` | 该 op 所在的核类型。`CUBE`=AI Core 的 Cube 单元侧，`AIV`=AI Vector 核 |
+
+### 2. 调度时序字段
+
+| 字段 | 类型 | 取值示例 | 含义 |
+|------|------|----------|------|
+| `duration` | int | `1` | 该 op 的执行时长（cycle 数）。HIVM 模型估算的指令 latency |
+| `start_cycle` | int | `0` | 调度器分配的起始 cycle。多个 op 可有相同 start_cycle（并行） |
+| `end_cycle` | int | `1` | 调度器分配的结束 cycle，`end_cycle = start_cycle + duration` |
+| `depends_on` | array<int> | `[3, 3]` | 数据依赖的前驱 op id 列表。重复 id（如 `[3,3]`）表示该 op 消费 op 3 的两个不同输出 |
+
+### 3. 同步与屏障字段
+
+| 字段 | 类型 | 取值示例 | 含义 |
+|------|------|----------|------|
+| `is_sync` | bool | `false` | 是否为同步操作（`set_flag`/`wait_flag`/`pipe_barrier` 等）。同步 op 不产生计算/搬运 work，但占用 cycle |
+| `is_barrier` | bool | `false` | 是否为屏障（`pipe_barrier`/`PIPE_ALL`）。屏障强制所有 pipe 排空，影响 `weighted_cycles` 计算 |
+| `event_id` | string | `""` | 同步事件标识符，用于配对 `set_flag`/`wait_flag`。空串表示非事件型 op |
+| `event_generation` | int | `0` | 事件代数，用于区分同名事件的多次触发 |
+| `sender_pipe` | string | `"PIPE_UNKNOWN"` | 事件的发送方 pipe（`set_flag` 所在 pipe） |
+| `receiver_pipe` | string | `"PIPE_UNKNOWN"` | 事件的接收方 pipe（`wait_flag` 所在 pipe） |
+
+### 4. 工作量字段（roofline 分析核心输入）
+
+| 字段 | 类型 | 取值示例 | 含义 |
+|------|------|----------|------|
+| `bytes` | int | `0`, `16384` | MTE 操作搬运的字节数。仅对 MTE 类 op 有效，用于计算 mte work_done |
+| `elements` | int | `0`, `4096` | 计算操作处理的元素数。对 compute op 用于 `work_done = elements × loop_multiplier` |
+| `flops` | int | `0` | 浮点运算次数。C++ 发射器对 matmul 类 op 填充 `2·M·N·K`；若为 0，`extract_hivm` 会从输入 load 推断 |
+| `loop_multiplier` | int | `1`, `1000` | **循环展开倍数**。该 op 在外层循环中执行的次数。work 计算时乘以它：`work = elements × loop_multiplier`。这是 real_data vs real_data_2 差异的根源 |
+| `repeat` | int | `1` | CCE 指令的 repeat 次数（>1 表示 op 内部迭代）。当前 IR 阶段通常为 1 |
+| `mask` | int | `0` | SIMD lane 屏蔽数（0=所有 lane 激活）。非零表示部分 lane 被禁用，影响实际吞吐 |
+
+### 5. 内存空间字段（MTE 路径分类）
+
+| 字段 | 类型 | 取值示例 | 含义 |
+|------|------|----------|------|
+| `src_space` | string | `""`, `"gm"`, `"ub"` | 源地址空间。空串=未知（触发带宽回退）。加载时归一化见 `_SPACE_NORMALIZE` |
+| `dst_space` | string | `""`, `"ub"`, `"gm"` | 目标地址空间。与 src_space 组合形成 transfer path label（如 `gm->ub`） |
+| `elem_type` | string | `""`, `"bf16"`, `"fp32"`, `"i64"` | 元素数据类型。映射到 `Precision` 枚举，用于 compute 的 work_breakdown 分精度统计 |
+
+### 6. Buffer 管理字段
+
+| 字段 | 类型 | 取值示例 | 含义 |
+|------|------|----------|------|
+| `multi_buffer_slots` | int | `1` | 多缓冲槽位数（software pipeline depth）。>1 表示该 op 参与 multi-buffer 流水 |
+| `read_buffers` | array | `[]` | 读取的 buffer 版本列表，用于跨 op 数据依赖追踪 |
+| `write_buffers` | array | `[]` | 写入的 buffer 版本列表 |
+| `read_versions` | array | `[]` | 读取的 buffer 版本号，配合 multi-buffer 实现生产者-消费者同步 |
+| `write_versions` | array | `[]` | 写入的 buffer 版本号 |
+
+## 三、pipe 字段取值与硬件单元映射
+
+`pipe` 是最关键的字段，决定 op 跑在哪个硬件流水线。映射关系在 `perfbound/extract/op_classifier.py` 中定义：
+
+| pipe 取值 | 对应 Component | 硬件单元 | 典型 op |
+|-----------|---------------|----------|---------|
+| `PIPE_M` | cube | Cube 矩阵单元 | `mmadL1`, `matmul` |
+| `PIPE_V` | vector | Vector 向量单元 | `add`, `mul`, `exp`, `cast` |
+| `PIPE_S` | scalar | Scalar 标量单元 | `muli`, `trunci`, `constant`, `get_block_idx` |
+| `PIPE_MTE2_V` | mte_gm | MTE2（GM→UB 搬运） | `load`（Vector 侧） |
+| `PIPE_MTE2_C` | mte_gm | MTE2（GM→L1 搬运） | `load`（Cube 侧） |
+| `PIPE_MTE1` | mte_l1 | MTE1（L1→L0A/B 搬运） | L1 到 L0 的数据搬运 |
+| `PIPE_MTE3` | mte_ub | MTE3（UB→GM 搬运） | `store` |
+| `PIPE_FIX` | mte_ub | FixPipe（L0C→GM） | Cube 结果回写 GM |
+| `PIPE_ALL` | scalar | 全 pipe 屏障 | `pipe_barrier` |
+| `PIPE_UNKNOWN` | scalar（回退） | 未分类 | `set_ffts_base_addr` 等配置 op |
+
+## 四、core_type 取值
+
+| 取值 | 含义 |
+|------|------|
+| `CUBE` | 该 op 在 AI Core 的 Cube 侧执行（Cube/MTE1/MTE2_C/Scalar） |
+| `AIV` | 该 op 在 AI Core 的 Vector 侧执行（Vector/MTE2_V/MTE3/FixPipe） |
+
+## 五、src_space / dst_space 取值
+
+归一化后的取值（见 `_SPACE_NORMALIZE`）：
+
+| 取值 | 含义 | 层级 |
+|------|------|------|
+| `gm` | Global Memory（HBM/DDR） | 片外，最慢 |
+| `l1` | L1 Buffer（Cube 专用） | 片上 |
+| `l0a`/`l0b` | L0A/L0B（Cube 输入缓冲） | 片上，最近 |
+| `l0c` | L0C（Cube 输出缓冲） | 片上 |
+| `ub` | Unified Buffer（Vector 专用） | 片上 |
+
+常见 transfer path：
+
+- `gm->ub`：GM 到 UB，走 MTE2_V，带宽最低
+- `gm->l1`：GM 到 L1，走 MTE2_C
+- `ub->gm`：UB 回写 GM，走 MTE3
+- `l0c->gm`：Cube 结果回写，走 FixPipe
+
+## 六、关键字段在分析中的使用路径
+

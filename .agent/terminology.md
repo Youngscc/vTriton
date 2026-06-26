@@ -4,7 +4,7 @@
 | --- | --- | --- | --- | --- | --- |
 | AscendModel 方言 | AscendModel dialect | - | 本项目自定义 MLIR dialect，用于表示 Ascend 性能建模相关操作。 | `include/AscendModel/IR/`, `lib/AscendModel/IR/` | 区别于 Triton dialect 和 BiShengIR/HIVM dialect。 |
 | HIVM IR | HIVM IR / NPUIR | HIVM / NPUIR | Ascend/BiShengIR 侧的低层 IR，供 HIVM-native 调度、同步、trace 分析使用。 | `tools/tritonsim-hivm/`, `lib/AscendModel/Analysis/HIVMAnalysis.cpp` | 不是 AscendModel dialect；可能由 Triton DSL dump 得到。 |
-| DES graph | DES graph JSON | DES | C++ HIVM 分析导出的结构化 JSON，包含 operations、pipe、duration、dependencies、bytes/elements、可选 flops 等字段，供 Python `extract_hivm` 消费。 | `perfbound/extract/hivm_extractor.py`, `docs/perfbound/profile_utilization/input_sources.md` | 用于模型/诊断输入；不是 profiling 真实耗时。`flops` 当前存在文档口径差异，见 `docs/known-issues.md`。 |
+| DES graph | DES graph JSON | DES | C++ HIVM 分析导出的结构化 JSON，包含 operations、pipe、duration、dependencies、bytes/elements、可选 flops 等字段，供 Python `extract_hivm` 消费。 | `perfbound/extract/hivm_extractor.py`, `docs/perfbound/profile_utilization/input_sources.md` | 用于模型/诊断输入；不是 profiling 真实耗时。`flops` 当前存在文档口径差异，见 `.agent/known-issues.md`。 |
 | op_summary | msprof op summary CSV | - | msprof 导出的 profiling 汇总 CSV，含 `Task Duration(us)` 和 component active-time 字段。 | `perfbound/analyze/profile_utilization.py`, `perfbound/validate/msprof_parser.py` | 提供真实 elapsed/active time；不同于 DES 模型时间。 |
 | 校准数据库 | Calibration database | CalibrationDB | Python dataclass 集合，承载 sustained hardware rates、CI、source、n_runs 和 memory bandwidth table。 | `perfbound/calibration/constants.py`, `perfbound/calibration/calib_loader.py` | 区别于 `configs/*.json` 的架构配置。 |
 | 硬件配置 | Hardware configuration | - | JSON 描述硬件 clock、memory spaces、compute units、data movers、pipeline 和 performance_model。 | `configs/*.json`, `configs/hardware_schema.json`, `lib/AscendModel/Analysis/HardwareConfig.cpp` | 主要供 C++建模/配置；CalibrationDB 供 Python sustained-rate 模型。 |
@@ -43,7 +43,7 @@
 | DES duration / schedule | cycles | `OpRecord.duration_cycles`, `start_cycle`, `end_cycle`; HIVM bottleneck diagnosis reports cycles. |
 | Profiling elapsed / active time | microseconds | `op_summary` fields named `*(us)`; used by `profile_utilization.py`. |
 | Clock conversion | cycles per microsecond | `CalibrationDB.core.cycles_per_us`; C++ perf report uses Ascend 910B constant `1850 cycles/us`. |
-| Compute work | ops or FLOPs | `component_model.py` uses `op.flops` when present, otherwise `op.elements`; `profile_utilization.py` currently uses `op.elements` for compute work. This difference is recorded in `docs/known-issues.md`. |
+| Compute work | ops or FLOPs | `component_model.py` uses `op.flops` when present, otherwise `op.elements`; `profile_utilization.py` currently uses `op.elements` for compute work. This difference is recorded in `.agent/known-issues.md`. |
 | MTE work | bytes | MTE components aggregate `bytes_transferred * loop_multiplier`. |
 | Compute ideal rate | ops/us or FLOP/us | Cube/Vector calibration TFLOPS are converted to per-microsecond rates by multiplying by `1e6`. |
 | Memory bandwidth | bytes/us | Calibration memory bandwidth lookup returns bytes/us; some docs note `GB/s * 1000 = bytes/us`. |

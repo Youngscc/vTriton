@@ -733,6 +733,37 @@ def test_demo_profile_utilization_cases_cover_expected_outputs(
     assert report.hivm_bottleneck.pipeline_diagnosis.root_cause == hivm_pipeline_root
 
 
+def test_run_from_files_can_ignore_scalar_des_operations():
+    """ignore_scalar 只分析 Compute/MTE，同时保留真实 kernel elapsed。"""
+    case_dir = _DEMO_INPUT_DIR / "cases" / "sync_overhead"
+    baseline = run_from_files(
+        case_dir / "op_summary.csv",
+        case_dir / "des.json",
+        _DEMO_CALIBRATION,
+    )
+    report = run_from_files(
+        case_dir / "op_summary.csv",
+        case_dir / "des.json",
+        _DEMO_CALIBRATION,
+        ignore_scalar=True,
+    )
+
+    assert report.ignore_scalar is True
+    assert report.elapsed_time_us == baseline.elapsed_time_us
+    assert "scalar" not in report.component_results
+    assert report.dominant_component != Component.SCALAR
+    assert report.exposed_control_frac_model is None
+    assert report.exposed_control_frac_measured is None
+    assert report.exposed_control_deficit_pts is None
+    assert report.exposed_control_deficit_us is None
+    assert report.n_sync_ops is None
+    assert report.hivm_bottleneck is not None
+    assert all(
+        diagnosis.pipe not in {"PIPE_S", "PIPE_ALL", "Scalar", "All"}
+        for diagnosis in report.hivm_bottleneck.op_diagnoses
+    )
+
+
 @pytest.mark.skipif(not _KDA_DES.exists(), reason="real kda_des.json not present")
 def test_chunk_kda_exposed_control_is_insufficient_parallelism():
     """Real chunk_kda: exposed scalar control/sync → Insufficient Parallelism @ scalar."""

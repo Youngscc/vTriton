@@ -16,6 +16,7 @@ report = run_from_files(
     "path/to/des.json",
     "path/to/calib.json",
     kernel_name="kernel_name",
+    ignore_scalar=False,
 )
 ```
 
@@ -55,6 +56,28 @@ report_json = run_profile_utilization_to_json(
 | `r_threshold` | `0.50` | residency 判断阈值 |
 | `work_tolerance` | `0.10` | work mismatch warning 的相对误差阈值 |
 | `t_bound_us` | 不指定 | 外部传入的 tight bound，单位 us |
+| `ignore_scalar` | `False` | 过滤 DES 中的 Scalar component，只使用 Cube、Vector、MTE 做 component/HIVM 诊断；真实 elapsed time 不变 |
+
+### 忽略 Scalar
+
+需要暂时排除 Scalar 控制路径时：
+
+```python
+report = run_from_files(
+    "path/to/op_summary.csv",
+    "path/to/des.json",
+    "path/to/calib.json",
+    ignore_scalar=True,
+)
+```
+
+该选项会过滤映射为 `Component.SCALAR` 的 DES operation，包括 `PIPE_S` 和
+`PIPE_ALL`，并且不生成 Scalar component 指标。Cube、Vector、MTE 上的操作仍
+参与分析。`Task Duration(us)` 继续作为 A/U/R 的真实墙钟时间分母；由于各 pipe
+可能重叠，代码不会用 Scalar active time 直接减去 elapsed time。暴露控制/同步
+赤字也不会在此模式下计算。该选项不会重新运行或压缩 DES 调度，剩余 Compute/MTE
+operation 继续使用原始 `start_cycle/end_cycle`；Scalar 依赖造成的时间线间隙可能
+仍然存在。
 
 ## 屏幕 UI 输出
 

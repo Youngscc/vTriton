@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Optional
@@ -121,6 +121,7 @@ class OperatorBottleneckReport:
     dominant_share: float
     component_results: dict[str, ComponentUtilization] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    ignore_scalar: bool = False
 
     # —— 对论文的补充：暴露控制/同步赤字的量化 ——
     # 仅当判定为 Insufficient Parallelism 且主导为暴露的 Scalar 控制时填充。
@@ -576,6 +577,7 @@ def run_from_files(
     work_tolerance: float = 0.10,
     t_bound_us: float | None = None,
     calibration_db: CalibrationDB | None = None,
+    ignore_scalar: bool = False,
 ) -> OperatorBottleneckReport:
     """从 op_summary、DES graph 和 calibration 文件端到端运行分析。
 
@@ -585,7 +587,12 @@ def run_from_files(
     floor（compute_component_floor）只是吞吐下界，对 chunk_kda 这类非吞吐受限的
     kernel 过松（~225 µs），不能用作 author headroom 的基准；DES 原始 makespan
     又是 per-iteration（未 loop 放大）。因此紧 bound 必须由调用方提供，不提供时
-    deficit_pts 仍给出（与分母无关），但 deficit_us 留空。"""
+    deficit_pts 仍给出（与分母无关），但 deficit_us 留空。
+
+    ``ignore_scalar=True`` 时，过滤 DES 中归类为 ``Component.SCALAR`` 的
+    operation，并移除 op_summary 的 Scalar active time，只用 Cube、Vector 和
+    MTE component 做 bound 与诊断。真实 ``Task Duration(us)`` 保持不变，因为
+    各 pipe 可能重叠，不能用 Scalar active time 直接扣减墙钟时间。"""
 
     op_row = _read_op_summary_row(op_summary_path, kernel_name)
     profile_name = kernel_name or _cell(op_row, "Op Name", "op_name", "Name") or "unknown"
@@ -594,6 +601,15 @@ def run_from_files(
 
     des_metadata, des_input_warnings = read_des_graph_metadata(desgraph_path)
     extract = extract_hivm(desgraph_path)
+    if ignore_scalar:
+        extract = replace(
+            extract,
+            operations=[
+                op for op in extract.operations
+                if op.component != Component.SCALAR
+            ],
+        )
+        active_time_us.pop(Component.SCALAR, None)
     db = calibration_db if calibration_db is not None else load_calibration(calibration_path)
     component_bound = compute_component_floor_from_db(extract, db)
 
@@ -613,6 +629,7 @@ def run_from_files(
         r_threshold=r_threshold,
         work_tolerance=work_tolerance,
     )
+    report.ignore_scalar = ignore_scalar
     report.hivm_bottleneck = diagnose_hivm_bottleneck_from_des_ops(
         extract.operations,
         db,

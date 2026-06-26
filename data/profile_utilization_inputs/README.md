@@ -25,7 +25,12 @@ demo 一次只执行一个数据源。切换数据源时，修改 `scripts/demo_
 
 ```python
 ACTIVE_CASE = "real_data"
+IGNORE_SCALAR = False
 ```
+
+只分析 Compute/MTE 时将 `IGNORE_SCALAR` 改为 `True`。该开关过滤 DES Scalar
+operation 和 Scalar component，但不会从真实 `Task Duration(us)` 中减去 Scalar
+active time，也不会重新调度或压缩 DES 时间线。
 
 | case | 目标输出 |
 | --- | --- |
@@ -36,6 +41,7 @@ ACTIVE_CASE = "real_data"
 | `insufficient_parallelism` | operator `Insufficient Parallelism`，HIVM `PipelineImbalance` |
 | `sync_overhead` | operator `Insufficient Parallelism`，HIVM `SyncOverhead` |
 | `real_data` | 真实 profiling/DES 输入，用于当前主要分析 |
+| `real_data_2` | 带 loop multiplier 的真实 profiling/DES 输入 |
 
 ## 示例命令
 

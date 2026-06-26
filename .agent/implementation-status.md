@@ -18,11 +18,11 @@ automatically considered hardware-validated.
 | Component/grid/serialization analytical models | 已编码 | 有 pytest 覆盖 | Mathematical behavior is unit-tested; hardware validation depends on separate validation harness | `perfbound/model/`, `tests/perfbound/test_component_model.py`, `tests/perfbound/test_grid_model.py`, `tests/perfbound/test_bounds.py`, `tests/perfbound/test_serialization.py` |
 | Bound combiner and report model | 已编码 | 有 pytest 覆盖 | Hardware soundness/tightness validation is environment-dependent | `perfbound/combine/`, `tests/perfbound/test_combine.py`, `tests/perfbound/test_report.py`, `tests/perfbound/test_report_measured.py` |
 | Validation harness and msprof parsing | 已编码 | 有 pytest 覆盖 | Real NPU/CANN/msprof validation is hardware-dependent | `perfbound/validate/`, `perfbound/validate/msprof_parser.py`, `tests/perfbound/test_validation_harness.py`, `tests/perfbound/test_msprof_parser.py`, `scripts/remote_bench.py` |
-| Profile utilization analysis | 已编码 | 有 pytest 覆盖 | Depends on quality and units of DES graph, `op_summary`, and calibration inputs | `perfbound/analyze/profile_utilization.py`, `tests/perfbound/test_profile_utilization.py` |
+| Profile utilization analysis, including optional Scalar filtering | 已编码 | 有 pytest 覆盖 | Depends on quality and units of DES graph, `op_summary`, and calibration inputs; Scalar filtering preserves measured elapsed time | `perfbound/analyze/profile_utilization.py`, `tests/perfbound/test_profile_utilization.py` |
 | HIVM bottleneck diagnosis | 已编码 | 有 pytest 覆盖 | Uses model/DES evidence; hardware truth comparison is separate | `perfbound/analyze/hivm_bottleneck_diagnosis.py`, `tests/perfbound/test_hivm_bottleneck_cpp_reference.py`, `tests/perfbound/test_calibration_wiring.py` |
 | Shared analysis rate helpers | 已编码 | 间接覆盖 | Validation inherits callers' tests | `perfbound/analyze/rate_utils.py`, callers in `perfbound/analyze/` |
 | Profile utilization demo and case selection | 已编码 | Script-level tests are not clearly separated; behavior is exercised by shell/docs workflows | UI/report output should be rechecked when schema changes | `scripts/demo_profile_utilization.py`, `scripts/run_profile_utilization_cases.sh`, `data/profile_utilization_inputs/README.md` |
-| Component roofline / Tier 2 floor | 已编码 | 有 pytest 覆盖 | Unit contract with profile utilization is 待确认 where `flops` differs from `elements` | `perfbound/model/component_model.py`, `tests/perfbound/test_component_model.py`, `docs/known-issues.md` |
+| Component roofline / Tier 2 floor | 已编码 | 有 pytest 覆盖 | Unit contract with profile utilization is 待确认 where `flops` differs from `elements` | `perfbound/model/component_model.py`, `tests/perfbound/test_component_model.py`, `.agent/known-issues.md` |
 | Native traditional Roofline report | 已编码 | Native FileCheck-style samples exist | Current native build/smoke validation 待确认 | `lib/AscendModel/Transforms/PerfReportPass.cpp`, `lib/AscendModel/Transforms/PipelineAnalysisPass.cpp`, `test/layernorm_ascend.mlir` |
 | Ascend Profiling `op_summary` active-time parsing | 已编码 | 有 pytest 覆盖 | Real profiling correctness depends on msprof CSV schema compatibility | `perfbound/analyze/profile_utilization.py::_active_times_from_op_summary`, `perfbound/validate/msprof_parser.py`, `tests/perfbound/test_msprof_parser.py` |
 
@@ -45,18 +45,18 @@ automatically considered hardware-validated.
 | Repository-wide Python type checking | No `pyproject.toml`, `mypy.ini`, or equivalent config found | 待确认 |
 | Repository-wide CI matrix | No CI workflow was identified in the scanned files | 待确认 |
 | Production release/package process | Not evident from scanned code/docs | 待确认 |
-| Profile-utilization compute work unit contract | `profile_utilization.py` uses `elements`; `component_model.py` prefers `flops` then falls back to `elements` | 待确认; tracked in `docs/known-issues.md` |
+| Profile-utilization compute work unit contract | `profile_utilization.py` uses `elements`; `component_model.py` prefers `flops` then falls back to `elements` | 待确认; tracked in `.agent/known-issues.md` |
 
 ## HIVM / Ascend Profiling Coverage Snapshot
 
 | Topic | Current behavior | Coverage status |
 | --- | --- | --- |
-| Kernel/operator/component relationship | One selected `op_summary` row represents the kernel/operator diagnosis; DES operations are aggregated into components. | Documented in `docs/architecture.md` and `docs/terminology.md`; diagnosis branches are covered by `tests/perfbound/test_profile_utilization.py`. |
+| Kernel/operator/component relationship | One selected `op_summary` row represents the kernel/operator diagnosis; DES operations are aggregated into components. | Documented in `.agent/architecture.md` and `.agent/terminology.md`; diagnosis branches are covered by `tests/perfbound/test_profile_utilization.py`. |
 | Theoretical baseline source | DES graph plus `CalibrationDB`; component floor uses sustained compute rates and memory bandwidth. | Covered by component-model and HIVM extractor tests; hardware validation is separate. |
 | Actual data source | `op_summary` supplies `Task Duration(us)` and active-time counters. | Covered by profile-utilization/msprof-parser tests; real schema drift remains possible. |
 | Missing fields / abnormal values | DES metadata reader emits warnings; `extract_hivm` rejects `schedule_truncated=true`; profile numeric cells default to `0.0`; utilization warnings flag negative/too-large active time and ratios above `1.05`. | Edge behavior has targeted tests in profile/HIVM suites; complete input-schema validation remains 待确认. |
 | Roofline | C++ traditional roofline and Python component roofline are both present. | Python model has pytest coverage; native report validation depends on native build/FileCheck-style samples. |
-| Profiling aggregation and diagnosis chain | `run_from_files -> extract_hivm -> compute_component_floor_from_db -> _component_stats_from_des_ops -> analyze_operator_bottleneck -> diagnose_hivm_bottleneck_from_des_ops`. | Documented in `docs/architecture.md`; high-level diagnosis logic has pytest coverage. |
+| Profiling aggregation and diagnosis chain | `run_from_files -> extract_hivm -> compute_component_floor_from_db -> _component_stats_from_des_ops -> analyze_operator_bottleneck -> diagnose_hivm_bottleneck_from_des_ops`. | Documented in `.agent/architecture.md`; high-level diagnosis logic has pytest coverage. |
 
 ## Maintenance Notes
 

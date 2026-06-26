@@ -45,7 +45,7 @@
 | Issue | Evidence | Impact | Status |
 | --- | --- | --- | --- |
 | `README.md`, `BUILD.md`, and `docs/DEPLOYMENT_GUIDE.md` document different build environments/versions | Files list different LLVM/CMake/CANN contexts | New users may not know which path fits their machine | Open; document local choice before bootstrapping |
-| `PROGRESS.md` contains historical and current sections that may conflict over status labels | Same file has "Current State" plus later historical milestone text | Readers may confuse old milestone text with current status | Open; prefer `docs/implementation-status.md` for maintained summary |
+| `PROGRESS.md` contains historical and current sections that may conflict over status labels | Same file has "Current State" plus later historical milestone text | Readers may confuse old milestone text with current status | Open; prefer `.agent/implementation-status.md` for maintained summary |
 | `configs/README.md` lists Ascend 910C as planned, but no `ascend_910c.json` was found | `configs/README.md`, file scan | Planned support should not be treated as implemented | Open |
 | `include/AscendModel/HardewareConfig.h` appears misspelled next to `HardwareConfig.h` | File scan | Could confuse include usage; actual role is 待确认 | Open |
 
