@@ -33,8 +33,15 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tritonsim-opt/tritonsim-opt.cpp")
     MLIRSCFDialect
     MLIRArithDialect
     MLIRBufferizationDialect
+    MLIRLinalgDialect
     MLIRMathDialect
+    MLIRMemRefDialect
     MLIRTensorDialect
+    # AscendModelAnalysis touches MemRef SubView/ReinterpretCast accessors, which
+    # pull MemRef's TilingInterface impl (→ linalg::makeTiledShapes); name the
+    # provider explicitly (unsatisfied in the submodule's current CMake config).
+    MLIRLinalgUtils
+    MLIRLinalgTransforms
     LLVMSupport
   )
 
@@ -66,6 +73,12 @@ target_link_libraries(tritonsim-hivm
   MLIRFuncDialect
   MLIRIR
   MLIRMemRefDialect
+  # A dialect lib above transitively pulls MLIRLinalgTransforms' TilingInterface
+  # external models, which need linalg::makeTiledShapes from MLIRLinalgUtils.
+  # That dep is unsatisfied in the submodule's current CMake config, so name it
+  # explicitly to keep the tools linkable.
+  MLIRLinalgUtils
+  MLIRLinalgTransforms
   MLIRParser
   MLIRSCFDialect
   MLIRSupport
