@@ -1,23 +1,34 @@
 # TritonSim
 
-基于 MLIR 的 Ascend NPU 性能建模工具。
+基于 MLIR 的 Ascend NPU 性能建模工具，目标硬件为昇腾 910B / 910B3。
 
-当前仓库主要覆盖两类输入：
+仓库采用**双层架构**：
+
+- **C++ / MLIR 层**（`lib/AscendModel/`、`tools/`）：自定义 AscendModel 方言与变换 pass，
+  负责 IR 解析、操作分类、周期估算与调度分析。工具 `tritonsim-opt` / `tritonsim-hivm`。
+- **Python 层**（`perfbound/`）：零 MLIR 依赖的纯 Python **分析性能下界模型**，
+  不跑硬件就能回答"这个 kernel 还能再快吗、瓶颈在哪"。这是当前活跃开发重心。
+  详见 [Python 性能边界模型 (perfbound)](#python-性能边界模型-perfbound)。
+
+C++ 工具与 Python 模型之间通过 JSON（DES 图、依赖图）松耦合通信。当前主要覆盖两类输入：
 
 - AscendModel MLIR：用于 pass 级性能分析与报告生成
 - HIVM IR：用于调度、同步与 trace 分析
 
-如需更详细的构建说明，见 [BUILD.md](BUILD.md)。硬件配置说明见
-[configs/README.md](configs/README.md)。
+如需更详细的构建说明见 [BUILD.md](BUILD.md)，硬件配置见 [configs/README.md](configs/README.md)，
+整体架构与 bound 模型深入说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 功能概览
 
-| 工具 | 用途 |
+| 工具 / 组件 | 用途 |
 |------|------|
 | `tritonsim-opt` | 运行 AscendModel 相关 pass pipeline |
 | `tritonsim-hivm` | 直接分析 `.npuir.mlir`，也可从 Triton DSL 触发 compile-only dump |
-| `ascend-tiling-opt` | 在构建中存在时提供 tiling 优化入口 |
+| `ascend-tiling-opt` | 在构建中存在时提供 tiling 优化入口（当前默认未构建） |
+| `perfbound/` | Python 性能下界模型：静态判断 kernel 是否已贴住硬件极限、差距归因到哪 |
+| `scripts/run_bound.py` | 端到端 bound 流水线入口（NPUIR dump → DES 图 → bound 报告） |
 | `configs/*.json` | 定义硬件参数，默认使用 `configs/ascend_910b.json` |
+| `docs/` | 架构、校准、部署文档 |
 
 ## 前置要求
 
@@ -237,6 +248,262 @@ $TRITON_OPT kernel.ttir --allow-unregistered-dialect --mlir-print-op-generic | \
 
 ---
 
+## Python 性能边界模型 (perfbound)
+
+### 它解决什么问题？
+
+你写完一个 Triton kernel，实测 450 µs。**这个数字是好是坏？还值得继续调吗？**
+通常只能靠经验猜，或者把 tiling / fusion / 双缓冲挨个试一遍，试完才知道有没有用。
+
+`perfbound` 就是来回答这个问题的。它对 kernel 做**纯静态分析**，算出一个**可证明保守的执行时间下界** `T_bound`：
+
+> 在当前硬件和当前 kernel 结构下，**无论怎么调优都不可能快过 `T_bound`**。
+
+有了这条地板线，优化就不再是猜谜：
+
+| 实测 vs 下界 | 说明 | 该做什么 |
+|------|------|---------|
+| `T_measured ≈ T_bound` | kernel 已经贴住硬件极限 | **停止微调**——再快只能换算法（fusion / 降精度 / 减少数据搬运） |
+| `T_measured ≫ T_bound` | 结构上还有差距 | 看报告的**五路归因**：它直接告诉你差距在哪、先做哪一件事 |
+
+两个关键特性：
+
+- **不编译、不运行 kernel，也不需要昇腾硬件**——只吃 IR，本地就能跑。实测数据只通过校准 (M1) 与验证 (M6) 进入模型。
+- **保守，而不是"预测"**——它不预测 kernel 会跑多快，只保证**不会更快**。宁可报得偏低，也不会给出一个你根本达不到的乐观目标。
+
+### 核心公式
+
+```
+T_bound = max(T_grid_floor, T_core_floor + T_serial_irreducible)
+```
+
+- `T_grid_floor`：芯片网格级下界（占据率、负载均衡、带宽 / 算力瓶颈）
+- `T_core_floor`：单核组件级下界（基于加权调和平均的 Roofline 各组件吞吐率）
+- `T_serial_irreducible`：不可消除的跨组件串行握手开销
+
+> 这是实现的**保守**形式——`T_serial` 附着于 Tier-2 项（握手为核内 Cube↔Vector）。spec 散文与 `perfbound/__init__.py` 使用加性简写 `max(grid, core)+serial`，该形式非保守（可能违反 `T_bound ≤ T_measured`）；`bound_combiner.py` 实现的是上式。详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §1。
+
+### 运行端到端 bound 流水线
+
+入口脚本 [`scripts/run_bound.py`](scripts/run_bound.py) 串联：
+
+```
+内核脚本 → Triton NPUIR dump → 清洗后的 NPUIR → DES 图 JSON → perfbound JSON 报告
+```
+
+```bash
+# 按注册名运行（内置内核见 perfbound/experiments/registry.py：
+# vector_add, vector_add_2x, softmax, layernorm, rmsnorm, seeded_gap1/gap2/serial）
+python scripts/run_bound.py --kernel seeded_serial --grid 128,32
+
+# 按脚本路径运行，并对比实测时间（给了 --measured-us，报告才会填入实测对比与 headroom 评估）
+python scripts/run_bound.py --script path/to/kernel.py --grid 128,32 \
+  --calibration <calib.json> --measured-us <T_measured>
+
+# 只想看流水线会执行什么，不实际跑：
+python scripts/run_bound.py --kernel vector_add --grid 128,32 --dry-run
+```
+
+`run_bound.py` 会调用 `build/bin/tritonsim-hivm` 生成 DES 图，因此真实（非 `--dry-run`）运行需要该二进制存在。
+内核脚本需暴露 `build_inputs()` 与 `Model`（契约见 `perfbound/experiments/registry.py` 的 `KernelSpec.validate_interface`）。
+
+### 读懂报告
+
+流水线产出 `<kernel>.report.json`；`KernelReport.to_text()`（`perfbound/combine/report.py`）给出等价的可读版本。
+以下为**示意输出**（数字仅用于说明格式），四块最值得看：
+
+#### 1. 三级可达性层次 — 差距该归谁
+
+```
+Reachability Hierarchy:
+  1. Hardware floor  (T_bound_HIVM):  120.00 us
+  2. DSL bound       (T_bound_DSL):   180.00 us   [compiler headroom: 60.00 us]
+  3. Measured        (T_measured):    450.00 us   [author residual, not proven attainable: 270.00 us]
+```
+
+- **compiler headroom** = `DSL − HIVM`：编译器（bishengir）实际生成的结构，比硬件本可允许的理想结构差多少。这部分你改 kernel 一般动不了。
+- **author residual** = `Measured − DSL`：实测比你自己写的 kernel 结构所允许的下界差多少——**这是通常你能动的部分**。
+- 若出现 `*** BOUND VIOLATION: T_bound > T_measured ***`，说明保守性被打破了：这是**模型 bug**，不是 kernel 变快了，请当作 issue 处理。
+
+#### 2. 五路归因 — 差距在哪、先做哪件事
+
+报告按占 `T_bound` 的比例列出五类差距，并给出**唯一一条**推荐动作（`recommended_action`）：
+
+| 归因项 | 含义 | 对应建议动作 |
+|--------|------|-------------|
+| `grid` | 网格切分不好：占据率低或负载不均 | 调整 grid 划分，提高占据率 / 均衡负载 |
+| `gap1_wrong_unit` | op 落在了错误的执行单元上 | 修正 DSL 类型，把 op 挪到合适的单元 |
+| `gap2_coalescing` | 搬运太碎，摊销开销大 | 合并传输，增大单次传输尺寸 |
+| `gap3_avoidable_serial` | 可避免的串行握手（Cube↔Vector 没重叠） | 加 ping-pong 双缓冲让握手重叠 |
+| `gap4_intra_unit_exec` | 单元内执行效率低 | 提高 SIMD repeat / mask 利用率 |
+
+若五类差距全部低于阈值，`recommended_action` 会直接告诉你 **"At component bound"**——
+没有可做的软件层优化了，只剩算法层重设计。
+
+#### 3. Attainable Headroom Assessment — 别把差距当成承诺的加速比
+
+```
+Attainable Headroom Assessment:
+  status:     diagnostic_upper_bound
+  confidence: low
+  diagnostic range: 0.00..85.00 us
+  point estimate: unavailable
+```
+
+这是最容易误读的一块，请注意：**`Measured − T_bound` 是上界，不是"能省下来的时间"。**
+模型刻意不给点估计（`point estimate: unavailable`）——按 `headroom_method` 的说法，
+在拿到**正确性验证过的反事实实测 (counterfactual)** 之前，不对"可兑现的加速"作任何声明。
+差距里也可能有一部分根本兑现不了：它来自模型尚未建模的项（例如标量发射受限），
+是 bound 偏低造成的假象，而非真实可回收的时间。
+`status` / `confidence` 就是在标注这份不确定性，请照字面理解。
+
+#### 4. 校准溯源
+
+报告还会带上 `Calibration:` 段（来源、版本、目标硬件、P0 常量是否齐全、最大相对 CI）。
+出现 `P0 violation` 或 `diagnostic fallback` 时，说明部分常量未实测、模型走了退化路径，
+结论的可信度要相应打折。校准流程见 [docs/CALIBRATION_GUIDE.md](docs/CALIBRATION_GUIDE.md)。
+
+### 完整示例：走查 seeded_serial
+
+下面用仓库自带的 `test/seeded_serial_bench.py` 完整走一遍。
+**本节所有数字均为真实输出**——来自 910B3 校准 (`calib_910b3_v1.json`) 与该 kernel 在 910B3 上 dump 出的 NPUIR，
+不是示意值。
+
+这个 fixture 是**故意造出来**的：kernel 内有两条**完全独立**的流——
+Stream A 是 HBM 搬运，Stream B 是 Vector FMA 链——中间隔了一个 `tl.debug_barrier()`。
+两条流不共享任何数据，所以这个 barrier **可证明是多余的**：它只是白白拆掉了 MTE↔Vector 的重叠。
+
+#### 步骤 1：拿到 NPUIR
+
+bound 模型吃的是 NPUIR。从 kernel 脚本 dump 需要昇腾环境
+（`build_inputs()` 用 `device="npu"`），dump 后用 `scripts/clean_npuir.py` 清洗：
+
+```bash
+TRITON_KERNEL_DUMP=1 TRITON_ALWAYS_COMPILE=1 TRITON_DUMP_DIR=/tmp/ttdump \
+  python test/seeded_serial_bench.py
+python scripts/clean_npuir.py <dump>.npuir.mlir seeded_serial.clean.npuir.mlir
+```
+
+**只有这一步需要硬件。** 拿到 `.npuir.mlir` 之后，下面的分析纯本地、离线可跑。
+
+#### 步骤 2：算 bound
+
+```bash
+python -m perfbound.combine.run_report \
+  --npuir seeded_serial.clean.npuir.mlir \
+  --grid 4096 --cores 20 \
+  --kernel-name seeded_serial \
+  --tritonsim-hivm build/bin/tritonsim-hivm \
+  --calibration perfbound/calibration/data/calib_910b3_v1.json \
+  --measured-us 3289.604
+```
+
+`--measured-us 3289.604` 是该 kernel 在 910B3 上的实测中位数（40 次，CV 0.06%）。
+不给这个参数也能算 bound，只是不会有实测对比。
+
+#### 步骤 3：读输出
+
+```
+=== Performance Bound Report: seeded_serial ===
+
+T_bound:   1840.01 us
+  Tier 1 (grid):      1838.21 us
+  Tier 2 (component): 1840.01 us
+  Serial irreducible: 0.00 us
+
+Binding: component
+  Component: vector
+
+Calibration:
+  source:   perfbound/calibration/data/calib_910b3_v1.json
+  version:  v1
+  hardware: Ascend 910B3
+  P0 status: complete
+  measured constants: 19 (max relative 95% CI: 1.07%)
+  warning: P1 scalar_overhead_factor not calibrated — kernel-level bounds may be optimistic
+  diagnostic fallback: Gap 4 startup latency uses hard-coded diagnostic defaults for vector, cube; attribution is not fully calibration-backed
+
+Attribution (absolute and fraction of T_bound):
+  gap3_avoidable_serial: 0.25 us (0.000)
+  grid: 0.00 us (0.000)
+  gap1_wrong_unit: 0.00 us (0.000)
+  gap2_coalescing: 0.00 us (0.000)
+  gap4_intra_unit_exec: 0.00 us (0.000)
+
+Reachability Hierarchy:
+  1. Hardware floor  (T_bound_HIVM):  1840.01 us
+  2. DSL bound       (T_bound_DSL):   1840.01 us   [compiler headroom: 0.00 us]
+  3. Measured        (T_measured):    3289.60 us   [author residual, not proven attainable: 1449.60 us]
+
+Attainable Headroom Assessment:
+  status:     unavailable
+  confidence: none
+  point estimate: unavailable
+  method: No correctness-verified counterfactual measurement is available.
+
+Recommended action: Add ping-pong buffer to overlap this handoff
+```
+
+#### 步骤 4：这份报告到底说了什么
+
+**① 卡在 Vector 上。** `Binding: component / vector`，Tier-2 (1840.01) 略高于 Tier-1 (1838.21)，
+两者几乎持平——说明网格切分没问题，瓶颈在单核 Vector 吞吐（就是 Stream B 那条 FMA 链）。
+
+**② 实测比下界慢了 1449.60 µs（44%）。** 这是 `author residual`。**但先别急着高兴**——
+注意 `Attainable Headroom Assessment` 明确写着 `status: unavailable` / `confidence: none`。
+模型在告诉你：*我不认为这 1449 µs 是你能拿回来的时间*。再看校准段的那条 warning：
+
+> `P1 scalar_overhead_factor not calibrated — kernel-level bounds may be optimistic`
+
+标量开销尚未校准，**bound 本身可能偏低**——残差里有多少是"真实差距"、多少是"模型缺项造成的假象"，
+这份报告没法区分。（这正是 `chunk_kda` 上踩过的坑：一个看似 55% 的 headroom 最后被证明是 bound 模型的伪影，
+kernel 实际已经卡在标量发射上。）
+
+**③ `Recommended action` 这次不要当真。** 报告建议 "Add ping-pong buffer"，但看归因的绝对值：
+五类差距加起来只有 0.25 µs，占 `T_bound` 的 **0.014%**——对一个 3289 µs 的 kernel 完全是噪声。
+它之所以还给建议、而不是报 "At component bound"，只是因为 `0.25/1840 ≈ 1.36e-4` 刚好越过了
+at-bound 阈值 `1e-4`。**归因的绝对值 (µs) 比推荐动作更重要**：当五类 gap 都接近 0 时，
+真正的信号是"那 1449 µs 没有被任何一类 gap 解释"，而不是那条推荐。
+
+一句话总结这个 kernel：**网格没问题、结构上五类已知 gap 都已榨干，剩下的差距模型解释不了**——
+下一步该做的是补标量校准 / 上 profile，而不是去加双缓冲。
+
+#### 步骤 5：headroom 怎样才算数——一个已验证的反事实
+
+前面反复强调"headroom 不等于承诺的加速比"。那什么时候才算数？答案是**做反事实实测**。
+`seeded_serial` 恰好做过（US-SB-008，结果存于 `.omc/research/hw_runs/seeded_serial/`）：
+
+把那条多余的 barrier 从编译器 IR 里摘掉，重新编译、实测、并逐位校验输出一致：
+
+| 项 | 值 |
+|----|-----|
+| 模型预测的 compiler headroom | **20.94 µs** |
+| 硬件实测去掉 barrier 后的提速 | **20.86 µs** |
+| 量化误差 | **0.37%** |
+| 输出逐位一致 (`output_verified`) | ✅ |
+
+模型预测 20.94 µs，硬件实际给了 20.86 µs。**这才是一个可兑现的 headroom**——
+因为它有一个正确性验证过的反事实撑着。步骤 4 里那 1449 µs 没有，所以模型拒绝为它背书。
+
+> 注：这个 20.94 µs 的 compiler headroom 来自 US-SB-008 的专门实验（带 `pipe_barrier` 校准常量）；
+> 上面步骤 3 的默认路径未建模该项，因此那里显示 `compiler headroom: 0.00 us`。
+
+### 模型组织
+
+六个阶段：`calibration/` (M1) → `extract/` (M2/M3) → `model/` (M4) → `combine/` (M5) → `validate/` (M6)。
+
+| 阶段 | 目录 | 职责 |
+|------|------|------|
+| M1 | `calibration/` | 硬件常量校准数据库（实测在此进入） |
+| M2/M3 | `extract/` | DSL 网格提取 + HIVM 组件提取 |
+| M4 | `model/` | 网格 / 组件分析模型（纯函数） |
+| M5 | `combine/` | 边界合并 + 五路归因 + 双限 (two-limit) |
+| M6 | `validate/` | 保守性 / 紧致性验证 |
+
+完整说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)（架构权威参考）。
+
+---
+
 ## 测试与验证
 
 常用本地检查：
@@ -247,10 +514,19 @@ $TRITON_OPT kernel.ttir --allow-unregistered-dialect --mlir-print-op-generic | \
 python3 test/triton_smoke.py
 ```
 
-启用测试后可运行：
+Python (perfbound) 测试套件位于 `tests/perfbound/`，`conftest.py` 会自动把仓库根加入 `sys.path`：
 
 ```bash
-ctest --test-dir build
+python -m pytest tests/perfbound/                       # 全部
+python -m pytest tests/perfbound/test_bounds.py         # 单文件
+python -m pytest tests/perfbound/ -k chunk_kda          # 按关键字筛选
+python -m pytest tests/hivm/                            # HIVM 同步 / 组件验证
+```
+
+启用 C++ 测试后可运行：
+
+```bash
+ctest --test-dir build     # 需在 cmake 配置时加 -DASCEND_MODEL_ENABLE_TESTS=ON
 ```
 
 ---
@@ -408,21 +684,27 @@ bash /tmp/run_prefill.sh
 ## 仓库结构
 
 ```text
-include/AscendModel/   公共头文件
-lib/AscendModel/       分析、IR 与 transforms 实现
-tools/                 命令行工具入口
-configs/               硬件配置与 schema
+include/AscendModel/   公共头文件（方言、接口、pass 声明）
+lib/AscendModel/       分析、IR 与 transforms 的 C++ 实现
+tools/                 命令行工具入口（tritonsim-opt / tritonsim-hivm）
+perfbound/             Python 两层级分析性能下界模型（活跃开发重心）
+tests/                 Python 测试套件（perfbound / hivm）
+test/                  C++ 示例输入（.mlir/.ttir）与 smoke/bench 脚本
+configs/               硬件配置与 schema（910B / 910B3）
+scripts/               构建、补丁应用、bound 流水线与基准脚本
+docs/                  架构、校准、部署文档
 patches/               应用到 thirdparty 子模块的本地补丁
-scripts/               构建、补丁应用等辅助脚本
-test/                  示例输入与 smoke tests
-thirdparty/            外部依赖
+thirdparty/            外部依赖（triton-ascend、AscendNPU-IR 等）
 ```
 
 ## 说明
 
-- 默认硬件配置为 Ascend 910B
+- 默认硬件配置为 Ascend 910B；校准与硬件实测针对 **910B3**（见 `configs/ascend_910b3.json`）
+- `perfbound` 以源码内导入方式运行（仓库根加入 `sys.path`），无需 pip 安装
+- 硬件实测 / 校准微基准 (M6) 在远端 910B3 机器上执行，而非本地
 - 与具体本机路径绑定的示例、临时脚本路径和历史实现细节未保留在本 README 中
-- 更深入的构建选项、Triton 集成方式和硬件配置格式请分别查看 [BUILD.md](BUILD.md) 与 [configs/README.md](configs/README.md)
+- 更深入的构建选项、Triton 集成方式和硬件配置格式请分别查看 [BUILD.md](BUILD.md) 与 [configs/README.md](configs/README.md)；
+  整体架构与 bound 模型见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## License
 

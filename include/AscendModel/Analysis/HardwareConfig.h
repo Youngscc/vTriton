@@ -11,6 +11,7 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/JSON.h"
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -106,6 +107,72 @@ struct DataMover {
 };
 
 //===----------------------------------------------------------------------===//
+// tilesim-style micro-architecture tables (migrated from tilesim 910B1)
+//===----------------------------------------------------------------------===//
+
+/// One row of the per-(intrinsic, dtype) vector instruction cycle table.
+/// Mirrors tilesim VecIntrinsics: computing/head/interval cycles per repeat.
+struct VecCycleEntry {
+  int compute = 0;
+  int head = 0;
+  int interval = 0;
+};
+
+/// Small-packet bandwidth fitting coefficients (tilesim pkt_param).
+/// Applied when the transfer packet size is below ``thresholdBytes``.
+struct SmallPacketCoeffs {
+  bool enabled = false;
+  int thresholdBytes = 256;
+  // Bucket selection mirrors tilesim: <64B -> "64B", <128B -> "128B",
+  // <256B -> "256B". Each bucket has (a, b) fitting coefficients.
+  double a64 = 0, b64 = 0;
+  double a128 = 0, b128 = 0;
+  double a256 = 0, b256 = 0;
+};
+
+/// A bandwidth entry keyed by "src:dst" memory spaces.
+/// Either core-independent (singleGbps) or per-core (degrades as more cores
+/// contend for the same off-chip port, e.g. GM<->UB on 910B).
+struct BandwidthTable {
+  bool hasPerCore = false;
+  double singleGbps = 0.0;            // core-independent bandwidth (GB/s)
+  std::map<int, double> perCoreGbps;  // core_num -> GB/s (1..N)
+  SmallPacketCoeffs smallPacket;
+};
+
+/// Cube (GEMM) micro-architecture parameters migrated from tilesim
+/// (cube_throughput, cube_repeat_cycles, L0 tile limit for best_k0).
+struct CubeModelConfig {
+  // basic throughput per repeat: [basicM, basicK, basicN].
+  // tilesim stores cube_throughput as [16, 32, 16]; the K value is a
+  // numerator divided by the element byte size, i.e. basicK = 32/elemBytes
+  // (fp16->16, fp32->8, int8->32), which equals the fractal K dimension.
+  int basicM = 16;
+  int basicKNumerator = 32;  // basicK = basicKNumerator / (elemBytes)
+  int basicN = 16;
+  // repeat cycles per dtype key ("fp32","fp16","bf16","int8")
+  llvm::StringMap<int> repeatCycles;
+  // L0 tile footprint limit (bytes) controlling best_k0 selection.
+  int l0TileLimitKb = 32;
+};
+
+/// Optional per-HIVM-opcode cost loaded from the v3 opcode calibration table.
+/// ``cycles`` is the pipe issue/resource occupancy. ``latency`` is the
+/// dependency-visible delay; when absent it defaults to ``cycles``.
+struct OpcodeCycleCost {
+  double cycles = 0.0;
+  double latency = 0.0;
+  double startupCycles = 0.0;
+  double cyclesPerByte = 0.0;
+  bool hasCycles = false;
+  bool hasLatency = false;
+  bool hasStartupCycles = false;
+  bool hasCyclesPerByte = false;
+  std::string source;
+  std::string subpipe;
+};
+
+//===----------------------------------------------------------------------===//
 // Pipeline Stage
 //===----------------------------------------------------------------------===//
 
@@ -118,6 +185,15 @@ struct PipelinePath {
 //===----------------------------------------------------------------------===//
 // HardwareConfig
 //===----------------------------------------------------------------------===//
+
+/// Result of a bandwidth lookup, mirroring tilesim ``lookup_bw``.
+/// ``bwGBs`` is the per-(src,dst,corenum,pkt) bandwidth in GB/s using the
+/// tilesim GiB convention (1 GB = 1024^3 B). ``isSmallPacket`` records
+/// whether the small-packet fitting branch was taken.
+struct BandwidthEntry {
+  double bwGBs = 0.0;
+  bool isSmallPacket = false;
+};
 
 class HardwareConfig {
 public:
@@ -170,6 +246,20 @@ public:
   int getVectorWidthBytes() const;
   llvm::StringRef getVectorComputeSpace() const;
   int getVectorOpCyclesPerInstruction(llvm::StringRef opName) const;
+  double getCostModelParam(llvm::StringRef name, double defaultValue) const;
+  int64_t getCostModelIntParam(llvm::StringRef name, int64_t defaultValue) const;
+  std::optional<OpcodeCycleCost>
+  lookupOpcodeCycleCost(llvm::StringRef pipeName,
+                        llvm::StringRef opName) const;
+  llvm::StringRef getOpcodeCalibrationVersion() const {
+    return opcodeCalibrationVersion;
+  }
+  llvm::StringRef getOpcodeCalibrationPath() const {
+    return opcodeCalibrationPath;
+  }
+  // Inter-pipe sync op cost (cycles) from calibration.sync_op_cycles, or the
+  // supplied conservative default when the config omits the entry.
+  int getSyncOpCycles(llvm::StringRef opName, int defaultCycles) const;
 
   // HBM bandwidth (convenience)
   double getHBMBandwidthGBs() const;
@@ -212,6 +302,54 @@ public:
   int64_t estimateMemoryCycles(llvm::StringRef moverName, int64_t bytes) const;
   int64_t estimateMemoryCyclesWithLatency(llvm::StringRef space, int64_t bytes) const;
 
+  //===--------------------------------------------------------------------===//
+  // tilesim-migrated micro-architecture queries (root cause ①/②)
+  //===--------------------------------------------------------------------===//
+
+  /// Look up the per-(src,dst,corenum,pkt) bandwidth in GB/s, mirroring
+  /// tilesim ``ArcConfig.lookup_bw``. ``coreNum<=0`` falls back to the
+  /// hardware default active core count (see ``getActiveBandwidthCores``).
+  /// ``pktBytes>0`` enables the small-packet fitting branch when configured.
+  /// Unknown (src,dst) pairs fall back to the aggregate HBM bandwidth so the
+  /// estimate degrades gracefully instead of failing.
+  BandwidthEntry lookupBandwidth(llvm::StringRef src, llvm::StringRef dst,
+                                 int coreNum, int64_t pktBytes) const;
+
+  /// Look up the per-(intrinsic,dtype) vector cycle triplet
+  /// {compute, head, interval}, mirroring tilesim ``lookup_vec_cycle``.
+  /// ``elementBits`` selects the dtype bucket; unknown (intrinsic,dtype)
+  /// falls back to fp32 then to a sensible per-intrinsic default.
+  VecCycleEntry lookupVecCycle(llvm::StringRef intrinsic,
+                               int elementBits) const;
+
+  /// Estimate transfer cycles for moving ``bytes`` from ``src`` to ``dst``
+  /// across ``coreNum`` concurrent cores, using the tilesim GiB bandwidth
+  /// convention and clock frequency. Includes small-packet fitting.
+  int64_t estimateTransferCycles(llvm::StringRef src, llvm::StringRef dst,
+                                 int64_t bytes, int coreNum) const;
+
+  /// Default number of concurrent cores used for bandwidth degradation of
+  /// vector transfers (GM<->UB). Defaults to the 910B1 saturation point (48).
+  int getActiveBandwidthCores() const { return activeBandwidthCores; }
+  void setActiveBandwidthCores(int cores) { activeBandwidthCores = cores; }
+
+  /// Whether small-packet bandwidth fitting is enabled (tilesim
+  /// ``enable_small_package``). Defaults to false to match tilesim.
+  bool getEnableSmallPacketBw() const { return enableSmallPacketBw; }
+  void setEnableSmallPacketBw(bool v) { enableSmallPacketBw = v; }
+
+  /// Whether two hardware units (by costmodel name, e.g. "vec_mte2"/"mte3")
+  /// are mutex partners: they share a physical pipeline and cannot execute in
+  /// parallel (tilesim ``MutexComponents`` / ``pipe_exclusive_config``). On 910B
+  /// the AIV MTE2 (vector load) and MTE3 (vector store) share one pipeline.
+  bool areMutexUnits(llvm::StringRef a, llvm::StringRef b) const;
+
+  // Cube (GEMM) micro-architecture: migrated from tilesim cube_config.
+  void getCubeModelThroughput(int elementBits, int &basicM, int &basicK,
+                              int &basicN) const;
+  int getCubeModelRepeatCycles(int elementBits) const;
+  int getCubeModelL0TileLimitBytes() const;
+
   // Pipeline info
   const PipelinePath *getPipelinePath(llvm::StringRef name) const;
   bool canRunInParallel(llvm::StringRef path1, llvm::StringRef path2) const;
@@ -224,6 +362,11 @@ public:
 
 private:
   bool parseJSON(const llvm::json::Value &json, std::string &error);
+  bool loadOpcodeCalibrationFromFile(llvm::StringRef path, std::string &error);
+
+  /// Populate the tilesim-migrated tables with 910B1 measured values
+  /// (hardcoded-fallback path; JSON is authoritative in production).
+  void populateTilesimDefaults910B();
 
   std::string name;
   std::string vendor;
@@ -236,9 +379,33 @@ private:
   llvm::StringMap<DataMover> dataMovers;
   llvm::StringMap<PipelinePath> pipelinePaths;
   llvm::StringMap<int> vectorOpCyclesPerInstruction;
+  llvm::StringMap<double> costModelParams;
+  llvm::StringMap<int> syncOpCycles;
+  llvm::StringMap<OpcodeCycleCost> opcodeCycleCosts;
+  std::string opcodeCalibrationVersion;
+  std::string opcodeCalibrationPath;
 
   // Parallelism info
   llvm::StringMap<bool> parallelismFlags;
+
+  // tilesim-migrated micro-architecture tables.
+  // Bandwidth keyed by "src:dst" (costmodel space names: hbm/l2/l1/l0a/l0b/
+  // l0c/ub). Vector instruction cycles keyed by intrinsic -> dtype -> entry.
+  llvm::StringMap<BandwidthTable> bandwidthTables;
+  llvm::StringMap<llvm::StringMap<VecCycleEntry>> vecCycleTables;
+  CubeModelConfig cubeModel;
+  int activeBandwidthCores = 48;   // 910B1 vec_core_num saturation point
+  bool enableSmallPacketBw = false;
+  // Global small-packet coefficients (tilesim pkt_param): a single (a,b) set
+  // per size bucket applied to ANY mover lookup when enableSmallPacketBw is on
+  // and the mover's own table has no per-table small_packet entry. tilesim keeps
+  // one global pkt_param dict on ArcConfig (910B1.yaml); per-table overrides it.
+  SmallPacketCoeffs globalSmallPacket;
+  bool hasGlobalSmallPacket = false;
+  // Mutex unit groups (tilesim MutexComponents): each group is a clique of
+  // unit-name strings that share a pipeline and cannot run in parallel.
+  // Default 910B: {"vec_mte2", "mte3"} (AIV MTE2<->MTE3).
+  std::vector<std::vector<std::string>> mutexGroups;
 };
 
 //===----------------------------------------------------------------------===//
@@ -254,6 +421,14 @@ void setHardwareConfig(std::unique_ptr<HardwareConfig> config);
 
 /// Load and set hardware config from file.
 bool loadHardwareConfigFromFile(llvm::StringRef path, std::string &error);
+
+/// Load an independent hardware configuration for one analysis invocation.
+/// Returns the default 910B config when path is empty. Unlike
+/// loadHardwareConfigFromFile, this does NOT mutate the process-global config,
+/// so concurrent / repeated analyses cannot observe each other's state and the
+/// returned config is always validated.
+std::shared_ptr<const HardwareConfig>
+loadHardwareConfigForAnalysis(llvm::StringRef path, std::string &error);
 
 } // namespace ascend
 } // namespace mlir
